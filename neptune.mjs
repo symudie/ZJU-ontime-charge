@@ -173,7 +173,7 @@ async function cmdLogin() {
       try {
         const resp = await fetch(
           `${BASE}/getOpenId?code=${oneTimeCode}&state=${encodeURIComponent("{'areaid':6}")}`,
-          { redirect: "manual", headers: { "User-Agent": UA } }
+          { redirect: "manual" }
         );
         const loc = resp.headers.get("location") || "";
         openId = new URL(loc).searchParams.get("openId") || "";
@@ -298,7 +298,7 @@ async function cmdParse(rawLink) {
     try {
       const resp = await fetch(
         `${BASE}/getOpenId?code=${oneTimeCode}&state=${encodeURIComponent("{'areaid':6}")}`,
-        { redirect: "manual", headers: { "User-Agent": UA } }
+        { redirect: "manual" }
       );
       const loc = resp.headers.get("location") || "";
       const u = new URL(loc);
