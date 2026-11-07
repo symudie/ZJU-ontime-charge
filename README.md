@@ -55,7 +55,8 @@ cd ZJU-ontime-charge && node neptune.mjs login     # clone 不含本地配置，
 之后在你想要预约的前一天晚上，执行：
 
 ```bash
-node neptune.mjs chargeon 50359162 04      # 预约下一个 6:30 自动开电
+node neptune.mjs chargeon                 # 预约下一个 6:30（用配置里的桩位）
+node neptune.mjs chargeon 50359162 04    # 或指定别的桩位
 node neptune.mjs chargeon cancel           # 取消预约
 node neptune.mjs status                    # 看余额 / 在充状态
 ```

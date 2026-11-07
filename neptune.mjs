@@ -237,12 +237,8 @@ async function cmdLogin() {
     let port = "";
     const devs = [...usage.entries()].sort((a, b) => b[1].count - a[1].count);
     if (devs.length) {
-      // 自动选最常用的桩和插座，无需人工选择
-      const [addr, info] = devs[0];
-      const dev = await getDeviceInfo(addr);
-      port = [...info.ports.entries()].sort((a, b) => b[1] - a[1])[0][0];
-      devaddress = addr;
-      console.log(`✅ 自动选用常用地：${dev.devdescript ?? addr}（设备 ${addr}，本月 ${info.count} 次，插座 ${port}）`);
+      devaddress = devs[0][0];
+      port = [...devs[0][1].ports.entries()].sort((a, b) => b[1] - a[1])[0][0];
     } else {
       devaddress = await ask(rl, "没查到本月充电记录，请手动输入设备号（桩身标签）: ");
       port = await ask(rl, "插座号（两位）: ");
@@ -276,15 +272,8 @@ async function cmdChargeOn(...args) {
     return 0;
   }
 
-  let devaddress = (a || "").trim();
-  let port = (b || "").trim();
-  const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
-  try {
-    if (!devaddress) devaddress = await ask(rl, "设备编号（如 50359162）: ");
-    if (!port) port = await ask(rl, "插座号（两位，如 04）: ");
-  } finally {
-    rl?.close();
-  }
+  const devaddress = (a || "").trim() || CONFIG.devaddress;
+  const port = (b || "").trim() || CONFIG.port;
   if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
     console.log("❌ 格式不对：设备号≥6位数字，插座号两位数字。");
     return 1;
@@ -440,8 +429,8 @@ async function cmdServe(portArg) {
 // ---- status / stop ----
 async function cmdStatus() {
   requireAccount();
-  const [user, dev, ch] = await Promise.all([getUserInfo(), getDeviceInfo(), isCharging()]);
-  console.log(`余额：${yuan(user.readyaccountmoney)}｜设备：${dev.devdescript ?? "?"}｜端口：${dev.portstatur}`);
+  const [user, ch] = await Promise.all([getUserInfo(), isCharging()]);
+  console.log(`余额：${yuan(user.readyaccountmoney)}`);
   console.log(ch ? `⚠️ 充电中：插座 ${ch.devport}，${ch.begindt} 起，预扣 ${yuan(ch.yfMoney)}` : "当前没有充电订单。");
   return 0;
 }
