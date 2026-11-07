@@ -29,7 +29,7 @@ https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accoun
 
 请注意千万不要泄漏相关参数。
 
-理论上执行login之后会自动生成配置文件，若你喜欢抓包也可以自行修改，而后把 .example给去除拼成`neptune.config.local.json`。
+理论上执行 login 之后会自动生成配置文件，若想手动调整，直接编辑 `neptune.config.local.json` 即可。
 
 ## 日常开电：chargeon
 
@@ -73,7 +73,7 @@ node neptune.mjs stop     # 结束充电（退款约 30 秒到账）
 
 - 扣费为账户预存款。
 - 仅供学习交流与**本人账号**自用自动化；勿操作他人设备、勿高频请求；接口为非官方逆向，随时可能变更。
-- 也可手动配置：复制 `neptune.config.local.example.json` 为 `neptune.config.local.json` 编辑。
+- 也可手动配置：创建 `neptune.config.local.json`，字段：`openId` / `employeeId` / `devaddress` / `port`（可选：`areaId`、`money`、`retryMinutes`、`serveToken`）。
 
 ## License
 
