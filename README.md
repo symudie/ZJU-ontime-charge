@@ -63,6 +63,12 @@ node neptune.mjs status                    # 看余额 / 在充状态
 
 - 我们提供了一个15分钟的轮询窗口，充电桩在6.45之前上线都可以正常充上电。
 
+想在服务器上直接敲 `chargeon`（免敲 node 前缀）？装一次命令别名：
+
+```bash
+mkdir -p ~/.local/bin && printf '#!/bin/bash\nnode "$HOME/ZJU-ontime-charge/neptune.mjs" chargeon "$@"\n' > ~/.local/bin/chargeon && chmod +x ~/.local/bin/chargeon
+```
+
 ## 其他命令
 
 ```bash
