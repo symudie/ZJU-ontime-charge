@@ -43,17 +43,27 @@ $ node neptune.mjs chargeon
 
 也可一行带参：`node neptune.mjs chargeon 50359162 04`。
 
-## 定时开电
+## 预约开电（最简服务器版）
+
+在任意常开的服务器上跑一个极简预约服务，把预约"发"给它：
 
 ```bash
-node neptune.mjs install 6:30 1-5   # 工作日 6:30；省略参数 = 每天 6:30
+node neptune.mjs serve            # 默认端口 7755，nohup/pm2 常驻均可
 ```
 
-自动写入 crontab（处理好绝对路径、`CRON_TZ=Asia/Shanghai` 时区、日志文件），重复执行更新旧条目、不重复堆积。
+预约 / 查看 / 取消（curl 即可，方便接微信推送、TG bot、手机快捷指令）：
 
-**不怕桩没开门**：设备实际上线时间常在 6:35 左右，`start` 失败后每 30 秒自动重试，默认窗口 15 分钟（配置 `retryMinutes` 或环境变量 `NPD_RETRY_MINUTES` 调整）。`start` 幂等：到点已有订单自动跳过，余额不足拒绝并记入日志。睡前插好充电器即可。
+```bash
+curl -X POST http://127.0.0.1:7755/at -H 'Content-Type: application/json' \
+  -d '{"time":"11-08 06:35","devaddress":"50359162","port":"04"}'
+curl http://127.0.0.1:7755/status
+curl -X POST http://127.0.0.1:7755/cancel
+```
 
-**服务器部署**：本地 `login` 后把 `neptune.config.local.json` 拷到服务器同目录并 `chmod 600`（或用环境变量）。想收到成功/失败推送，配置里加 `"serverChanKey": "SCTxxxx"`（[Server酱](https://sct.ftqq.com) 免费申请），结果自动推到微信。
+- `time` 支持 `"HH:MM"`（最近的未来，今晚设明早开）、`"MM-DD HH:MM"`、`"YYYY-MM-DD HH:MM"`；`devaddress/port` 省略时用已配置桩位
+- 到点自动执行 `start`：幂等 + 15 分钟重试窗口（不怕桩 6:35 才上线），结果经 Server酱推送到微信（配置 `serverChanKey`）
+- 同一时间只保留一条预约，新预约覆盖旧的；过期超 1 小时的预约会被丢弃
+- ⚠️ 公网部署请设置 `"serveToken"` 并在请求带 `X-Token` 头（或防火墙限端口）—— 预约会消耗你的余额
 
 ## 其他命令
 
@@ -61,6 +71,7 @@ node neptune.mjs install 6:30 1-5   # 工作日 6:30；省略参数 = 每天 6:3
 node neptune.mjs status   # 余额 / 充电订单 / 端口状态
 node neptune.mjs stop     # 结束充电（退款约 30 秒到账）
 node neptune.mjs parse    # 从链接解析 openId（只打印不写配置）
+node neptune.mjs install  # （可选）每天固定时间开电的 crontab 安装器
 ```
 
 ## 说明

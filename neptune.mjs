@@ -8,10 +8,12 @@
 //   node neptune.mjs start     # 开电（用配置里的桩位，幂等）
 //   node neptune.mjs chargeon  # 一问一答快速开电：输入设备编号和插座号即可
 //   node neptune.mjs stop      # 结束充电
+//   node neptune.mjs serve     # 预约服务器：POST {time,设备号,插座号} 到点自动开电
 //   node neptune.mjs status   # 余额 / 充电订单 / 端口状态
 //   node neptune.mjs parse    # 从充电页链接解析 openId 等字段（只打印不写配置）
 
 import { readFileSync, writeFileSync } from "node:fs";
+import http from "node:http";
 import { URLSearchParams } from "node:url";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -46,6 +48,7 @@ const CONFIG = {
   money: process.env.NPD_MONEY || LOCAL.money || "7", // 页面"开始充电"时的 money 选项（抓包原值，对应预付 ¥2）
   serverChanKey: process.env.NPD_SERVERCHAN_KEY || LOCAL.serverChanKey || "", // Server酱 SendKey（可选，开电结果推送到微信）
   retryMinutes: Number(process.env.NPD_RETRY_MINUTES ?? LOCAL.retryMinutes ?? 15), // start 失败重试窗口（分钟），应对桩未到营业时间
+  serveToken: process.env.NPD_SERVE_TOKEN || LOCAL.serveToken || "", // 预约服务访问令牌（可选，公网部署建议设置）
 };
 
 function requireAccount() {
@@ -571,6 +574,151 @@ async function cmdInstall(timeArg, daysArg) {
   return 0;
 }
 
+// ============================ 预约服务器（最简） ============================
+
+const SERVE_FILE = join(dirname(fileURLToPath(import.meta.url)), "neptune.serve.json");
+const pad2 = (n) => String(n).padStart(2, "0");
+
+/** 支持 "YYYY-MM-DD HH:MM" / "MM-DD HH:MM" / "HH:MM"（取最近的未来时刻） */
+function parseAtTime(str) {
+  const now = new Date();
+  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})$/);
+  let target;
+  if (m) {
+    target = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  } else if ((m = str.match(/^(\d{1,2})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})$/))) {
+    target = new Date(now.getFullYear(), +m[1] - 1, +m[2], +m[3], +m[4]);
+    if (target <= now) target.setFullYear(target.getFullYear() + 1);
+  } else if ((m = str.match(/^(\d{1,2}):(\d{2})$/))) {
+    target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), +m[1], +m[2]);
+    if (target <= now) target.setDate(target.getDate() + 1);
+  } else {
+    return null;
+  }
+  if (Number.isNaN(target.getTime()) || target <= now) return null;
+  return target;
+}
+
+function loadAppointments() {
+  try {
+    return JSON.parse(readFileSync(SERVE_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+function saveAppointments(list) {
+  writeFileSync(SERVE_FILE, JSON.stringify(list, null, 2) + "\n");
+}
+
+/** 极简预约服务：把 {time, 设备号, 插座号} POST 过来，到点自动执行开电 */
+async function cmdServe(portArg) {
+  requireAccount();
+  const port = Number(portArg) || Number(process.env.NPD_SERVE_PORT) || 7755;
+  let appointments = loadAppointments();
+  let firing = false;
+
+  const server = http.createServer(async (req, res) => {
+    const send = (code, obj) => {
+      res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(obj, null, 2));
+    };
+    if (CONFIG.serveToken && req.headers["x-token"] !== CONFIG.serveToken) {
+      return send(401, { ok: false, error: "令牌不对" });
+    }
+    const url = new URL(req.url, "http://localhost");
+    try {
+      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/status")) {
+        let charging = null;
+        try {
+          charging = await isCharging();
+        } catch {}
+        return send(200, {
+          ok: true,
+          appointments,
+          charging: charging ? `插座 ${charging.devport}，${charging.begindt} 起` : null,
+        });
+      }
+      if (req.method === "POST" && url.pathname === "/at") {
+        let body = "";
+        for await (const c of req) body += c;
+        const j = JSON.parse(body || "{}");
+        const target = parseAtTime(String(j.time || "").trim());
+        if (!target) {
+          return send(400, {
+            ok: false,
+            error: 'time 格式不对，支持 "HH:MM" / "MM-DD HH:MM" / "YYYY-MM-DD HH:MM"',
+          });
+        }
+        const devaddress = /^\d{6,}$/.test(j.devaddress || "") ? j.devaddress : CONFIG.devaddress;
+        const pilePort = /^\d{2}$/.test(j.port || "") ? j.port : CONFIG.port;
+        appointments = [
+          {
+            time: target.toISOString(),
+            timeLocal: `${target.getFullYear()}-${pad2(target.getMonth() + 1)}-${pad2(target.getDate())} ${pad2(target.getHours())}:${pad2(target.getMinutes())}`,
+            devaddress,
+            port: pilePort,
+            bookedAt: new Date().toISOString(),
+          },
+        ]; // 最简模型：只保留一条预约，新预约覆盖旧的
+        saveAppointments(appointments);
+        return send(200, { ok: true, booked: appointments });
+      }
+      if (req.method === "POST" && url.pathname === "/cancel") {
+        appointments = [];
+        saveAppointments(appointments);
+        return send(200, { ok: true, appointments });
+      }
+      send(404, { ok: false, error: "POST /at {time,devaddress?,port?} | POST /cancel | GET /status" });
+    } catch (err) {
+      send(500, { ok: false, error: String(err.message || err) });
+    }
+  });
+
+  // 每 20 秒检查一次：预约到点 → 触发一次开电（带重试窗口）；过期超 1 小时的直接丢弃
+  setInterval(async () => {
+    if (firing) return;
+    const now = Date.now();
+    const due = appointments.find((a) => new Date(a.time).getTime() <= now);
+    if (!due) return;
+    appointments = appointments.filter((a) => a !== due);
+    saveAppointments(appointments);
+    if (now - new Date(due.time).getTime() > 3600_000) {
+      console.log(`[serve] 丢弃过期预约（${due.timeLocal ?? due.time}，已超时 1 小时）`);
+      return;
+    }
+    firing = true;
+    console.log(`[serve] 预约到点：设备 ${due.devaddress} 插座 ${due.port}，执行开电…`);
+    try {
+      const code = await startCharging(due.devaddress, due.port, CONFIG.retryMinutes);
+      console.log(`[serve] 开电流程结束，exit=${code}`);
+    } catch (err) {
+      console.log(`[serve] 开电异常：${err.message}`);
+      await push("尼普顿预约开电异常", String(err.message || err));
+    }
+    firing = false;
+  }, 20_000);
+
+  server.listen(port, () => {
+    console.log(
+      [
+        "",
+        `预约服务器已启动：http://0.0.0.0:${port}`,
+        `  预约  curl -X POST http://127.0.0.1:${port}/at -H 'Content-Type: application/json' \\`,
+        `        -d '{"time":"11-08 06:35","devaddress":"${CONFIG.devaddress}","port":"${CONFIG.port}"}'`,
+        `  查看  curl http://127.0.0.1:${port}/status`,
+        `  取消  curl -X POST http://127.0.0.1:${port}/cancel`,
+        CONFIG.serveToken
+          ? "  已启用令牌校验（请求头 X-Token）"
+          : "  ⚠️ 未设置 serveToken：能访问此端口的人都可以预约（消耗你的余额），公网部署请配置令牌或防火墙",
+        "",
+      ].join("\n")
+    );
+  });
+
+  // 常驻：不返回，避免入口处的 process.exit 把刚启动的服务杀掉；Ctrl+C 退出
+  await new Promise(() => {});
+}
+
 // ============================ 入口 ============================
 
 const actions = {
@@ -580,20 +728,22 @@ const actions = {
   start: cmdStart,
   chargeon: cmdChargeOn,
   stop: cmdStop,
+  serve: cmdServe,
   install: cmdInstall,
 };
 const cmd = process.argv[2] ?? "status";
 if (!actions[cmd]) {
   console.log(
     "浙江大学尼普顿定时开电\n" +
-      "用法: node neptune.mjs <login|parse|status|start|chargeon|stop|install>\n" +
+      "用法: node neptune.mjs <login|parse|status|start|chargeon|stop|serve|install>\n" +
       "  login     配置向导：粘贴充电页链接即可完成配置（新用户从这里开始）\n" +
       "  parse     从链接解析 openId 等字段（只打印，不写配置）\n" +
       "  status    余额 / 充电订单 / 端口状态\n" +
-      "  start     开电（用配置里的桩位，幂等）\n" +
+      "  start     开电（用配置里的桩位，幂等，带重试窗口）\n" +
       "  chargeon  一问一答快速开电（chargeon [设备号] [插座号]）\n" +
       "  stop      结束充电\n" +
-      "  install   一键写入 crontab 定时开电（install [HH:MM] [周几]，如 install 6:30 1-5）"
+      "  serve     预约服务器：POST {time,设备号,插座号} 到点自动开电（serve [端口]）\n" +
+      "  install   一键写入 crontab 每日定时（install [HH:MM] [周几]）"
   );
   process.exit(2);
 }
