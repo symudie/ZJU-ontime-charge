@@ -24,8 +24,6 @@ const CONFIG = {
   areaId: LOCAL.areaId || "6",
   openId: LOCAL.openId || "",
   employeeId: LOCAL.employeeId || "",
-  devaddress: LOCAL.devaddress || "",
-  port: LOCAL.port || "",
   money: LOCAL.money || "7", // 页面开电时的金额选项（对应预扣 ¥2）
   retryMinutes: Number(LOCAL.retryMinutes ?? 15), // 桩 6:35 才上线的重试窗口
   serveToken: LOCAL.serveToken || "", // 公网部署的访问令牌（可选）
@@ -54,13 +52,13 @@ async function post(path, data) {
 
 const getUserInfo = async () =>
   (await post("getUserInfo", { openId: CONFIG.openId, areaId: CONFIG.areaId })).obj ?? {};
-const getDeviceInfo = async (devaddress = CONFIG.devaddress) =>
+const getDeviceInfo = async (devaddress) =>
   (await post("getDeviceInfo", { areaId: CONFIG.areaId, devaddress })).obj ?? {};
 const isCharging = async () =>
   (await post("isChargeing", { areaId: CONFIG.areaId, openId: CONFIG.openId })).obj ?? null;
 
-function requireAccount() {
-  if (!CONFIG.openId || !CONFIG.devaddress || !CONFIG.port) {
+function requireOpenId() {
+  if (!CONFIG.openId) {
     console.log("缺少账号配置，先运行：node neptune.mjs login");
     process.exit(2);
   }
@@ -221,35 +219,13 @@ async function cmdLogin() {
     employeeId = employeeId || String(user.employeeid);
     console.log(`✅ 账号有效：id=${employeeId}，余额 ${yuan(user.readyaccountmoney)}`);
 
-    // 从本月充电记录自动发现常用桩与插座
-    const now = new Date();
-    const term = `${now.getFullYear()}${pad2(now.getMonth() + 1)}`;
-    const log = (await post("getChargeLog", { employeeid: employeeId, term })).obj ?? [];
-    const usage = new Map();
-    for (const rec of log) {
-      const item = usage.get(String(rec.devaddress)) ?? { count: 0, ports: new Map() };
-      item.count++;
-      const p = String(rec.devport).padStart(2, "0");
-      item.ports.set(p, (item.ports.get(p) ?? 0) + 1);
-      usage.set(String(rec.devaddress), item);
-    }
-    let devaddress = "";
-    let port = "";
-    const devs = [...usage.entries()].sort((a, b) => b[1].count - a[1].count);
-    if (devs.length) {
-      devaddress = devs[0][0];
-      port = [...devs[0][1].ports.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    } else {
-      devaddress = await ask(rl, "没查到本月充电记录，请手动输入设备号（桩身标签）: ");
-      port = await ask(rl, "插座号（两位）: ");
-    }
     if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
       console.log("❌ 设备号/插座号格式不对。");
       return 1;
     }
-    const merged = { ...LOCAL, areaId, openId, employeeId, devaddress, port, money: LOCAL.money || "7" };
+    const merged = { ...LOCAL, areaId, openId, employeeId };
     writeFileSync(join(DIR, "neptune.config.local.json"), JSON.stringify(merged, null, 2) + "\n");
-    console.log(`\n✅ 配置已写入（该文件不入库）。开电：chargeon；取消：chargeon cancel。`);
+    console.log(`\n✅ 配置已写入（该文件不入库）。预约开电：chargeon <设备号> <插座号>`);
     return 0;
   } finally {
     rl?.close();
@@ -264,7 +240,7 @@ function nextChargeTime() {
   return t;
 }
 async function cmdChargeOn(...args) {
-  requireAccount();
+  requireOpenId();
   const [a, b] = args;
   if (a === "cancel") {
     saveAppointments([]);
@@ -272,10 +248,10 @@ async function cmdChargeOn(...args) {
     return 0;
   }
 
-  const devaddress = (a || "").trim() || CONFIG.devaddress;
-  const port = (b || "").trim() || CONFIG.port;
+  const devaddress = (a || "").trim();
+  const port = (b || "").trim();
   if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
-    console.log("❌ 格式不对：设备号≥6位数字，插座号两位数字。");
+    console.log('用法: node neptune.mjs chargeon <设备号> <插座号>   例: chargeon 50359162 04');
     return 1;
   }
   const t = nextChargeTime();
@@ -328,7 +304,7 @@ function parseAtTime(str) {
   return Number.isNaN(t.getTime()) || t <= now ? null : t;
 }
 async function cmdServe(portArg) {
-  requireAccount();
+  requireOpenId();
   const port = Number(portArg) || 7755;
   writeFileSync(PID_FILE, String(process.pid));
   let appointments = loadAppointments();
@@ -359,12 +335,17 @@ async function cmdServe(portArg) {
         const j = JSON.parse(body || "{}");
         const t = parseAtTime(String(j.time || "").trim());
         if (!t) return send(400, { ok: false, error: 'time 支持 "HH:MM" / "MM-DD HH:MM" / "YYYY-MM-DD HH:MM"' });
+        const devaddress = String(j.devaddress || "");
+        const pilePort = String(j.port || "");
+        if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(pilePort)) {
+          return send(400, { ok: false, error: "需要 devaddress（≥6位数字）与 port（两位数字）" });
+        }
         appointments = [
           {
             time: t.toISOString(),
             timeLocal: `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`,
-            devaddress: /^\d{6,}$/.test(j.devaddress || "") ? j.devaddress : CONFIG.devaddress,
-            port: /^\d{2}$/.test(j.port || "") ? j.port : CONFIG.port,
+            devaddress,
+            port: pilePort,
             bookedAt: new Date().toISOString(),
           },
         ];
@@ -428,14 +409,14 @@ async function cmdServe(portArg) {
 
 // ---- status / stop ----
 async function cmdStatus() {
-  requireAccount();
+  requireOpenId();
   const [user, ch] = await Promise.all([getUserInfo(), isCharging()]);
   console.log(`余额：${yuan(user.readyaccountmoney)}`);
   console.log(ch ? `⚠️ 充电中：插座 ${ch.devport}，${ch.begindt} 起，预扣 ${yuan(ch.yfMoney)}` : "当前没有充电订单。");
   return 0;
 }
 async function cmdStop() {
-  requireAccount();
+  requireOpenId();
   const ch = await isCharging();
   if (!ch) return console.log("当前没有充电订单。"), 0;
   const user = await getUserInfo();
@@ -463,10 +444,6 @@ async function cmdStop() {
 const actions = {
   login: cmdLogin,
   status: cmdStatus,
-  start: () => {
-    requireAccount();
-    return startCharging(CONFIG.devaddress, CONFIG.port, CONFIG.retryMinutes);
-  },
   chargeon: cmdChargeOn,
   stop: cmdStop,
   serve: cmdServe,
@@ -477,9 +454,7 @@ if (!actions[cmd]) {
     "浙江大学尼普顿定时开电\n" +
       "用法: node neptune.mjs <login|status|chargeon|start|stop|serve>\n" +
       "  login     配置向导（一次即可）\n" +
-      "  chargeon  预约下一个 6:30 自动开电：chargeon [设备号] [插座号]\n" +
-      "            chargeon cancel = 取消预约\n" +
-      "  start     立即开电（用配置里的桩位，带重试窗口，定时任务用）\n" +
+      "  chargeon  预约下一个 6:30 自动开电：chargeon <设备号> <插座号>；chargeon cancel = 取消预约\n" +
       "  stop      结束充电\n" +
       "  status    余额 / 订单 / 端口状态\n" +
       "  serve     预约执行器（通常无需手动运行：chargeon 会自动拉起，队列空自动退出）"
