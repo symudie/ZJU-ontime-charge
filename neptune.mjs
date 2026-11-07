@@ -233,24 +233,18 @@ async function cmdLogin() {
       item.ports.set(p, (item.ports.get(p) ?? 0) + 1);
       usage.set(String(rec.devaddress), item);
     }
-    const devs = [...usage.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 5);
     let devaddress = "";
     let port = "";
+    const devs = [...usage.entries()].sort((a, b) => b[1].count - a[1].count);
     if (devs.length) {
-      console.log("\n检测到你近期用过的充电桩：");
-      const infos = [];
-      for (const [addr, info] of devs) {
-        const dev = await getDeviceInfo(addr);
-        const top = [...info.ports.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        infos.push({ addr, top });
-        console.log(`  ${infos.length}. ${dev.devdescript ?? addr}（${addr}，本月 ${info.count} 次，常用插座 ${top}）`);
-      }
-      const pick = Number((await ask(rl, "选择你的桩（回车=1）: ")) || "1") - 1;
-      const chosen = infos[pick] ?? infos[0];
-      devaddress = chosen.addr;
-      port = (await ask(rl, `插座号（回车=${chosen.top}）: `)) || chosen.top;
+      // 自动选最常用的桩和插座，无需人工选择
+      const [addr, info] = devs[0];
+      const dev = await getDeviceInfo(addr);
+      port = [...info.ports.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      devaddress = addr;
+      console.log(`✅ 自动选用常用地：${dev.devdescript ?? addr}（设备 ${addr}，本月 ${info.count} 次，插座 ${port}）`);
     } else {
-      devaddress = await ask(rl, "设备号（桩身标签）: ");
+      devaddress = await ask(rl, "没查到本月充电记录，请手动输入设备号（桩身标签）: ");
       port = await ask(rl, "插座号（两位）: ");
     }
     if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
