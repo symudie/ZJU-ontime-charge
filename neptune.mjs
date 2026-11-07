@@ -418,14 +418,47 @@ async function cmdLogin() {
     let openId = "";
     let employeeId = "";
     let areaId = CONFIG.areaId;
-    try {
-      const u = new URL(link);
-      openId = u.searchParams.get("openId") || "";
-      employeeId = u.searchParams.get("employeeId") || "";
-      areaId = u.searchParams.get("areaid") || u.searchParams.get("areaId") || areaId;
-    } catch {
-      /* 不是 URL，退化为纯 openId 输入 */
-      openId = link;
+
+    if (/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/.test(link)) {
+      console.log(
+        [
+          "❌ 你粘贴的是微信 OAuth 授权中间页（openId 不在里面，复制早了）。",
+          "  这种链接只能由微信客户端完成授权：在微信里重新点开它，",
+          "  等「充电页」完整显示（能看到插座编号）后，再取链接：",
+          "  ⋯ → 「在浏览器打开」→ 复制地址栏里 szlzxn.cn/wx/indexn.html?openId=… 的完整网址。",
+        ].join("\n")
+      );
+      return 1;
+    }
+
+    const oneTimeCode = (link.match(/[?&]code=([\w-]+)/) || [])[1];
+    if (oneTimeCode && /szlzxn\.cn\/wxn\/getOpenId/.test(link)) {
+      // 用户复制到了带一次性 code 的跳转链接：尽力换取 openId（code 约 5 分钟有效，可能已被消费）
+      console.log("检测到一次性授权 code，尝试换取 openId…");
+      try {
+        const resp = await fetch(
+          `${BASE}/getOpenId?code=${oneTimeCode}&state=${encodeURIComponent("{'areaid':6}")}`,
+          { redirect: "manual", headers: { "User-Agent": UA } }
+        );
+        const loc = resp.headers.get("location") || "";
+        openId = new URL(loc).searchParams.get("openId") || "";
+      } catch {
+        openId = "";
+      }
+      if (!openId) {
+        console.log("❌ code 换取失败（已被微信消费过或已过期）。请回到充电页重新取链接。");
+        return 1;
+      }
+    } else {
+      try {
+        const u = new URL(link);
+        openId = u.searchParams.get("openId") || "";
+        employeeId = u.searchParams.get("employeeId") || "";
+        areaId = u.searchParams.get("areaid") || u.searchParams.get("areaId") || areaId;
+      } catch {
+        /* 不是 URL，退化为纯 openId 输入 */
+        openId = link;
+      }
     }
     if (!openId) {
       console.log(
