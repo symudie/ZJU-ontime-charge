@@ -81,7 +81,7 @@ node neptune.mjs install  # （可选）每天固定时间开电的 crontab 安�
 
 - 扣费为账户预存款（开电预扣约 ¥2，停止/充满后按实际用量结算）。
 - 仅供学习交流与**本人账号**自用自动化；勿操作他人设备、勿高频请求；接口为非官方逆向，随时可能变更。
-- 也可手动配置：复制 `neptune.config.local.example.json` 为 `neptune.config.local.json` 编辑，或用环境变量 `NPD_OPEN_ID` / `NPD_DEVADDRESS` / `NPD_PORT`。
+- 也可手动配置：复制 `neptune.config.local.example.json` 为 `neptune.config.local.json` 编辑。
 
 ## License
 

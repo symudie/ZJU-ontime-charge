@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 浙江大学尼普顿（新能充电 szlzxn.cn 老系统）定时开电工具
+// 浙江大学尼普顿定时开电工具
 // 控制协议来自作者本人微信 H5 抓包独立还原，仅用于操作本人账号与设备（扣账户预存款）。
 //
 // 用法：
@@ -26,7 +26,7 @@ const execFileAsync = promisify(execFile);
 
 const BASE = "http://www.szlzxn.cn/wxn";
 
-// ===== 账号配置加载：环境变量优先，其次本地配置文件（不入库） =====
+// ===== 账号配置加载：本地配置文件 =====
 function loadLocalConfig() {
   try {
     const p = join(dirname(fileURLToPath(import.meta.url)), "neptune.config.local.json");
@@ -37,15 +37,15 @@ function loadLocalConfig() {
 }
 const LOCAL = loadLocalConfig();
 const CONFIG = {
-  areaId: process.env.NPD_AREA_ID || LOCAL.areaId || "6",
-  openId: process.env.NPD_OPEN_ID || LOCAL.openId || "",
-  employeeId: process.env.NPD_EMPLOYEE_ID || LOCAL.employeeId || "",
-  devaddress: process.env.NPD_DEVADDRESS || LOCAL.devaddress || "",
-  port: process.env.NPD_PORT || LOCAL.port || "",
-  money: process.env.NPD_MONEY || LOCAL.money || "7", // 页面"开始充电"时的 money 选项（抓包原值，对应预付 ¥2）
-  serverChanKey: process.env.NPD_SERVERCHAN_KEY || LOCAL.serverChanKey || "", // Server酱 SendKey（可选，开电结果推送到微信）
-  retryMinutes: Number(process.env.NPD_RETRY_MINUTES ?? LOCAL.retryMinutes ?? 15), // start 失败重试窗口（分钟），应对桩未到营业时间
-  serveToken: process.env.NPD_SERVE_TOKEN || LOCAL.serveToken || "", // 预约服务访问令牌（可选，公网部署建议设置）
+  areaId: LOCAL.areaId || "6",
+  openId: LOCAL.openId || "",
+  employeeId: LOCAL.employeeId || "",
+  devaddress: LOCAL.devaddress || "",
+  port: LOCAL.port || "",
+  money: LOCAL.money || "7", // 页面"开始充电"时的 money 选项（抓包原值，对应预付 ¥2）
+  serverChanKey: LOCAL.serverChanKey || "", // Server酱 SendKey（可选，开电结果推送到微信）
+  retryMinutes: Number(LOCAL.retryMinutes ?? 15), // start 失败重试窗口（分钟），应对桩未到营业时间
+  serveToken: LOCAL.serveToken || "", // 预约服务访问令牌（可选，公网部署建议设置）
 };
 
 function requireAccount() {
@@ -53,7 +53,6 @@ function requireAccount() {
     console.log(
       "缺少账号配置（openId / devaddress / port）。\n" +
         "推荐运行 `node neptune.mjs login` 走向导；\n" +
-        "或设置环境变量 NPD_OPEN_ID / NPD_DEVADDRESS / NPD_PORT，\n" +
         "或参照 neptune.config.local.example.json 创建本地配置（已被 .gitignore 排除）。"
     );
     process.exit(2);
@@ -662,7 +661,7 @@ function saveAppointments(list) {
 /** 极简预约服务：把 {time, 设备号, 插座号} POST 过来，到点自动执行开电 */
 async function cmdServe(portArg) {
   requireAccount();
-  const port = Number(portArg) || Number(process.env.NPD_SERVE_PORT) || 7755;
+  const port = Number(portArg) || 7755;
   let appointments = loadAppointments();
   let firing = false;
 
