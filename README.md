@@ -29,6 +29,20 @@ https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accoun
 
 向导会校验账号、从你的充电记录里选出常用桩和插座、写入本地配置（已被 `.gitignore` 排除）。
 
+## 日常开电：chargeon
+
+换了个桩或插座？`chargeon` 一问一答直接开（扣已配置账号的预存款）：
+
+```console
+$ node neptune.mjs chargeon
+设备编号: 50359162
+插座号: 04
+本次开电：设备 50359162 插座 04（浙大玉泉曹光彪wd12a6，账号 id=1668794，余额 ¥6.55）
+✅ 开始充电成功：设备 50359162 插座 04，20261107182814 起，预扣 ¥2.00，最长 480 分钟
+```
+
+也可一行带参：`node neptune.mjs chargeon 50359162 04`。
+
 ## 定时开电
 
 ```bash

@@ -5,8 +5,9 @@
 // 用法：
 //   node neptune.mjs login    # 配置向导（粘贴充电页链接，一次即可）
 //   node neptune.mjs install  # 一键写入 crontab 定时开电（install [HH:MM] [周几]，如 install 6:30 1-5）
-//   node neptune.mjs start    # 开电（幂等：已在充电则跳过）
-//   node neptune.mjs stop     # 结束充电
+//   node neptune.mjs start     # 开电（用配置里的桩位，幂等）
+//   node neptune.mjs chargeon  # 一问一答快速开电：输入设备编号和插座号即可
+//   node neptune.mjs stop      # 结束充电
 //   node neptune.mjs status   # 余额 / 充电订单 / 端口状态
 //   node neptune.mjs parse    # 从充电页链接解析 openId 等字段（只打印不写配置）
 
@@ -114,11 +115,26 @@ async function isCharging() {
 
 const CONFIG_FILE = join(dirname(fileURLToPath(import.meta.url)), "neptune.config.local.json");
 
-// stdin 关闭（EOF/管道输入耗尽）时返回空串而不是抛异常
-const ask = (rl, q) => rl.question(q).then((v) => (v ?? "").trim()).catch(() => "");
+// 交互模式（TTY）走 readline；管道模式一次性读完 stdin 按行分发（readline 在管道下会丢行）
+let pipedLines = null;
+async function readAllStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString();
+}
+async function ask(rl, q) {
+  if (!process.stdin.isTTY) {
+    if (pipedLines === null) pipedLines = (await readAllStdin()).split("\n").map((s) => s.trim());
+    return pipedLines.shift() ?? "";
+  }
+  return rl
+    .question(q)
+    .then((v) => (v ?? "").trim())
+    .catch(() => "");
+}
 
 async function cmdLogin() {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
     console.log(
       [
@@ -251,7 +267,7 @@ async function cmdLogin() {
     );
     return 0;
   } finally {
-    rl.close();
+    rl?.close();
   }
 }
 
@@ -345,14 +361,41 @@ async function cmdStatus() {
 
 async function cmdStart() {
   requireAccount();
+  return startCharging(CONFIG.devaddress, CONFIG.port);
+}
+
+/** 一问一答快速开电：现场问设备号/插座号，用已配置账号的余额 */
+async function cmdChargeOn(devArg, portArg) {
+  requireAccount();
+  let devaddress = (devArg || "").trim();
+  let port = (portArg || "").trim();
+  const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
+  try {
+    if (!devaddress) devaddress = await ask(rl, "设备编号（如 50359162）: ");
+    if (!port) port = await ask(rl, "插座号（两位，如 04）: ");
+  } finally {
+    rl?.close();
+  }
+  if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
+    console.log("❌ 格式不对：设备号应为≥6位数字，插座号为两位数字。");
+    return 1;
+  }
+  return startCharging(devaddress, port);
+}
+
+/** 核心开电流程：start（配置里的桩）与 chargeon（现场问桩号）共用 */
+async function startCharging(devaddress, port) {
   const ch = await isCharging();
   if (ch) {
     console.log(`已有充电订单（插座 ${ch.devport}，${ch.begindt} 开始），跳过开电。`);
     return 0;
   }
 
-  const [dev, user] = await Promise.all([getDeviceInfo(), getUserInfo()]);
+  const [dev, user] = await Promise.all([getDeviceInfo(devaddress), getUserInfo()]);
   const balance = user.readyaccountmoney ?? 0;
+  console.log(
+    `本次开电：设备 ${devaddress} 插座 ${port}（${dev.devdescript ?? "未知设备"}，账号 id=${user.employeeid ?? "?"}，余额 ${yuan(balance)}）`
+  );
   if (balance < 200) {
     console.log(`余额不足（${yuan(balance)}，开电需预扣约 ¥2），中止。`);
     await push("尼普顿开电中止", `余额不足（${yuan(balance)}），请充值后重试`);
@@ -360,8 +403,8 @@ async function cmdStart() {
   }
 
   const base = {
-    devaddress: CONFIG.devaddress,
-    port: CONFIG.port,
+    devaddress,
+    port,
     money: CONFIG.money,
     areaId: CONFIG.areaId,
     openId: CONFIG.openId,
@@ -408,12 +451,12 @@ async function cmdStart() {
 
   const obj = result.obj ?? {};
   console.log(
-    `✅ 开始充电成功：插座 ${CONFIG.port}，${obj.begindt ?? ""} 起，` +
+    `✅ 开始充电成功：设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，` +
       `预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟`
   );
   await push(
     "尼普顿开电成功",
-    `插座 ${CONFIG.port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，余额 ${yuan(user.readyaccountmoney)}`
+    `设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，余额 ${yuan(user.readyaccountmoney)}`
   );
   return 0;
 }
@@ -502,6 +545,7 @@ const actions = {
   parse: cmdParse,
   status: cmdStatus,
   start: cmdStart,
+  chargeon: cmdChargeOn,
   stop: cmdStop,
   install: cmdInstall,
 };
@@ -509,13 +553,14 @@ const cmd = process.argv[2] ?? "status";
 if (!actions[cmd]) {
   console.log(
     "浙江大学尼普顿定时开电\n" +
-      "用法: node neptune.mjs <login|parse|status|start|stop|install>\n" +
-      "  login    配置向导：粘贴充电页链接即可完成配置（新用户从这里开始）\n" +
-      "  parse    从链接解析 openId 等字段（只打印，不写配置）\n" +
-      "  status   余额 / 充电订单 / 端口状态\n" +
-      "  start    开电（幂等，配合定时任务）\n" +
-      "  stop     结束充电\n" +
-      "  install  一键写入 crontab 定时开电（install [HH:MM] [周几]，如 install 6:30 1-5）"
+      "用法: node neptune.mjs <login|parse|status|start|chargeon|stop|install>\n" +
+      "  login     配置向导：粘贴充电页链接即可完成配置（新用户从这里开始）\n" +
+      "  parse     从链接解析 openId 等字段（只打印，不写配置）\n" +
+      "  status    余额 / 充电订单 / 端口状态\n" +
+      "  start     开电（用配置里的桩位，幂等）\n" +
+      "  chargeon  一问一答快速开电（chargeon [设备号] [插座号]）\n" +
+      "  stop      结束充电\n" +
+      "  install   一键写入 crontab 定时开电（install [HH:MM] [周几]，如 install 6:30 1-5）"
   );
   process.exit(2);
 }
