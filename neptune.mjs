@@ -3,11 +3,12 @@
 // 协议由作者本人账号抓包还原，仅操作本人账号（扣账户预存款）。
 // 命令：login 配置 / chargeon 预约下一个6:30 / serve 预约服务器 / status / stop
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, openSync, closeSync } from "node:fs";
 import http from "node:http";
 import { URLSearchParams } from "node:url";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 
 const DIR = dirname(fileURLToPath(import.meta.url));
@@ -297,11 +298,28 @@ async function cmdChargeOn(...args) {
   const t = nextChargeTime();
   const timeLocal = `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
   saveAppointments([{ time: t.toISOString(), timeLocal, devaddress, port, bookedAt: new Date().toISOString() }]);
+  ensureServeRunning();
   console.log(`✅ 已预约 ${timeLocal} 自动开电：设备 ${devaddress} 插座 ${port}\n取消：node neptune.mjs chargeon cancel`);
   return 0;
 }
 // ---- serve：极简预约服务器（POST /at 预约，到点自动开电）----
 const APPT_FILE = join(DIR, "neptune.serve.json");
+const PID_FILE = join(DIR, "neptune.serve.pid");
+/** 确保执行器（serve）在后台运行：不在则自动拉起，等价于 nohup ... & */
+function ensureServeRunning() {
+  try {
+    process.kill(Number(readFileSync(PID_FILE, "utf8").trim()), 0);
+    return console.log("执行器已在运行，复用现有进程。");
+  } catch {}
+  const log = openSync(join(DIR, "neptune.log"), "a");
+  const child = spawn(process.execPath, [join(DIR, "neptune.mjs"), "serve"], {
+    detached: true,
+    stdio: ["ignore", log, log],
+  });
+  child.unref();
+  closeSync(log);
+  console.log("执行器已在后台启动，开电完成后自动退出（日志：neptune.log）。");
+}
 function loadAppointments() {
   try {
     return JSON.parse(readFileSync(APPT_FILE, "utf8"));
@@ -329,6 +347,7 @@ function parseAtTime(str) {
 async function cmdServe(portArg) {
   requireAccount();
   const port = Number(portArg) || 7755;
+  writeFileSync(PID_FILE, String(process.pid));
   let appointments = loadAppointments();
   let firing = false;
 
@@ -384,6 +403,10 @@ async function cmdServe(portArg) {
   setInterval(async () => {
     if (firing) return;
     appointments = loadAppointments();
+    if (appointments.length === 0) {
+      console.log("[serve] 队列为空，执行器退出。下次 chargeon 会自动拉起。");
+      process.exit(0);
+    }
     const now = Date.now();
     const due = appointments.find((a) => new Date(a.time).getTime() <= now);
     if (!due) return;
@@ -476,7 +499,7 @@ if (!actions[cmd]) {
       "  start     立即开电（用配置里的桩位，带重试窗口，定时任务用）\n" +
       "  stop      结束充电\n" +
       "  status    余额 / 订单 / 端口状态\n" +
-      "  serve     预约服务器（常驻，chargeon 的预约由它执行）"
+      "  serve     预约执行器（通常无需手动运行：chargeon 会自动拉起，队列空自动退出）"
   );
   process.exit(2);
 }

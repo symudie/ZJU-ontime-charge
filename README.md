@@ -48,8 +48,7 @@ $ node neptune.mjs chargeon
 ```bash
 ssh server
 git clone https://github.com/symudie/ZJU-ontime-charge.git
-cd ZJU-ontime-charge && node neptune.mjs login     # clone 不含本地配置，需交互配置一次
-nohup node neptune.mjs serve > neptune.log 2>&1 &  # 常驻预约服务（服务器需有 Node 18+）
+cd ZJU-ontime-charge && node neptune.mjs login     # clone 不含本地配置，需交互配置一次（之后无需常驻进程，chargeon 自动管理执行器）
 ```
 
 **之后每次睡前，SSH 上去一条命令**（时间不用写，自动取下一个 6:30）：

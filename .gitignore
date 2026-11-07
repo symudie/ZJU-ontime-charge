@@ -13,3 +13,4 @@ flows_dump*
 # 系统/工具
 .DS_Store
 node_modules/
+neptune.serve.pid
