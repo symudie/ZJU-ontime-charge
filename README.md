@@ -56,7 +56,6 @@ nohup node neptune.mjs serve > neptune.log 2>&1 &  # 常驻预约服务（服务
 
 ```bash
 node neptune.mjs chargeon 50359162 04      # 预约下一个 6:30 自动开电
-node neptune.mjs chargeon now 50359162 04  # 插上就想马上充：立即开电
 node neptune.mjs chargeon cancel           # 取消预约
 node neptune.mjs status                    # 看余额 / 在充状态
 ```

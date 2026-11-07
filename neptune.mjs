@@ -274,13 +274,12 @@ function nextChargeTime() {
 }
 async function cmdChargeOn(...args) {
   requireAccount();
-  const [a, b, c] = args;
+  const [a, b] = args;
   if (a === "cancel") {
     saveAppointments([]);
     console.log("✅ 已取消预约。");
     return 0;
   }
-  if (a === "now") return chargeInteractive(b, c);
 
   let devaddress = (a || "").trim();
   let port = (b || "").trim();
@@ -301,23 +300,6 @@ async function cmdChargeOn(...args) {
   console.log(`✅ 已预约 ${timeLocal} 自动开电：设备 ${devaddress} 插座 ${port}\n取消：node neptune.mjs chargeon cancel`);
   return 0;
 }
-async function chargeInteractive(devArg, portArg) {
-  let devaddress = (devArg || "").trim();
-  let port = (portArg || "").trim();
-  const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
-  try {
-    if (!devaddress) devaddress = await ask(rl, "设备编号（如 50359162）: ");
-    if (!port) port = await ask(rl, "插座号（两位，如 04）: ");
-  } finally {
-    rl?.close();
-  }
-  if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
-    console.log("❌ 格式不对：设备号≥6位数字，插座号两位数字。");
-    return 1;
-  }
-  return startCharging(devaddress, port, 0);
-}
-
 // ---- serve：极简预约服务器（POST /at 预约，到点自动开电）----
 const APPT_FILE = join(DIR, "neptune.serve.json");
 function loadAppointments() {
@@ -490,7 +472,7 @@ if (!actions[cmd]) {
       "用法: node neptune.mjs <login|status|chargeon|start|stop|serve>\n" +
       "  login     配置向导（一次即可）\n" +
       "  chargeon  预约下一个 6:30 自动开电：chargeon [设备号] [插座号]\n" +
-      "            chargeon now [设备号] [插座号] = 立即开电；chargeon cancel = 取消预约\n" +
+      "            chargeon cancel = 取消预约\n" +
       "  start     立即开电（用配置里的桩位，带重试窗口，定时任务用）\n" +
       "  stop      结束充电\n" +
       "  status    余额 / 订单 / 端口状态\n" +
