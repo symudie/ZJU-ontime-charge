@@ -6,7 +6,8 @@
 //   node neptune.mjs login    # 配置向导（粘贴充电页链接，一次即可）
 //   node neptune.mjs install  # 一键写入 crontab 定时开电（install [HH:MM] [周几]，如 install 6:30 1-5）
 //   node neptune.mjs start     # 开电（用配置里的桩位，幂等）
-//   node neptune.mjs chargeon  # 一问一答快速开电：输入设备编号和插座号即可
+//   node neptune.mjs chargeon  # 预约下一个 6:30 自动开电：chargeon <设备编号> <插座号>
+//                              # chargeon now ... = 立即开电；chargeon cancel = 取消预约
 //   node neptune.mjs stop      # 结束充电
 //   node neptune.mjs serve     # 预约服务器：POST {time,设备号,插座号} 到点自动开电
 //   node neptune.mjs status   # 余额 / 充电订单 / 端口状态
@@ -369,9 +370,65 @@ async function cmdStart() {
   return startCharging(CONFIG.devaddress, CONFIG.port, CONFIG.retryMinutes);
 }
 
-/** 一问一答快速开电：现场问设备号/插座号，用已配置账号的余额 */
-async function cmdChargeOn(devArg, portArg) {
+/** 计算下一个开电时点：6:30；早上 10 点前运行都算"今天早上这轮"（到点即触发，靠重试窗口兜住） */
+function nextChargeTime() {
+  const now = new Date();
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 30);
+  if (t <= now && now.getHours() >= 10) t.setDate(t.getDate() + 1);
+  return t;
+}
+
+/** chargeon：预约下一个 6:30 左右自动开电（写预约队列，由 serve 到点执行）
+ *  chargeon [设备号] [插座号]           → 预约
+ *  chargeon now [设备号] [插座号]       → 不预约，立即开电（人在场）
+ *  chargeon cancel                      → 取消预约 */
+async function cmdChargeOn(a, b, c, d) {
   requireAccount();
+  if (a === "cancel") {
+    saveAppointments([]);
+    console.log("✅ 已取消预约。");
+    return 0;
+  }
+  if (a === "now") {
+    return chargeInteractive(b, c);
+  }
+
+  let devaddress = (a || "").trim();
+  let port = (b || "").trim();
+  const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
+  try {
+    if (!devaddress) devaddress = await ask(rl, "设备编号（如 50359162）: ");
+    if (!port) port = await ask(rl, "插座号（两位，如 04）: ");
+  } finally {
+    rl?.close();
+  }
+  if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
+    console.log("❌ 格式不对：设备号应为≥6位数字，插座号为两位数字。");
+    return 1;
+  }
+
+  const target = nextChargeTime();
+  const timeLocal = `${target.getFullYear()}-${pad2(target.getMonth() + 1)}-${pad2(target.getDate())} ${pad2(target.getHours())}:${pad2(target.getMinutes())}`;
+  saveAppointments([
+    {
+      time: target.toISOString(),
+      timeLocal,
+      devaddress,
+      port,
+      bookedAt: new Date().toISOString(),
+    },
+  ]);
+  console.log(
+    `✅ 已预约 ${timeLocal} 自动开电：设备 ${devaddress} 插座 ${port}\n` +
+      `到点由 serve 自动执行（幂等 + 15 分钟重试窗口，桩 6:35 上线也不怕）。\n` +
+      `取消：node neptune.mjs chargeon cancel`
+  );
+  await push("尼普顿预约成功", `${timeLocal} 自动开电（设备 ${devaddress} 插座 ${port}）`);
+  return 0;
+}
+
+/** 立即开电（chargeon now）：一问一答，人在场失败即时报 */
+async function chargeInteractive(devArg, portArg) {
   let devaddress = (devArg || "").trim();
   let port = (portArg || "").trim();
   const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
@@ -381,12 +438,12 @@ async function cmdChargeOn(devArg, portArg) {
   } finally {
     rl?.close();
   }
-    if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
-      console.log("❌ 格式不对：设备号应为≥6位数字，插座号为两位数字。");
-      return 1;
-    }
-    return startCharging(devaddress, port, 0); // 人在场，失败立即报，不拖重试
+  if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
+    console.log("❌ 格式不对：设备号应为≥6位数字，插座号为两位数字。");
+    return 1;
   }
+  return startCharging(devaddress, port, 0);
+}
 
 /** 核心开电流程：start（配置里的桩）与 chargeon（现场问桩号）共用
  *  retryMinutes > 0 时失败自动重试（每 30 秒一次），应对桩未营业/设备未上线（如 6:30 定时但实际 6:35 才开） */
@@ -674,9 +731,10 @@ async function cmdServe(portArg) {
     }
   });
 
-  // 每 20 秒检查一次：预约到点 → 触发一次开电（带重试窗口）；过期超 1 小时的直接丢弃
+  // 每 20 秒重读预约队列文件（支持 chargeon 等外部进程写入）并检查到点；过期超 1 小时的直接丢弃
   setInterval(async () => {
     if (firing) return;
+    appointments = loadAppointments();
     const now = Date.now();
     const due = appointments.find((a) => new Date(a.time).getTime() <= now);
     if (!due) return;
@@ -705,8 +763,9 @@ async function cmdServe(portArg) {
         `预约服务器已启动：http://0.0.0.0:${port}`,
         `  预约  curl -X POST http://127.0.0.1:${port}/at -H 'Content-Type: application/json' \\`,
         `        -d '{"time":"11-08 06:35","devaddress":"${CONFIG.devaddress}","port":"${CONFIG.port}"}'`,
-        `  查看  curl http://127.0.0.1:${port}/status`,
-        `  取消  curl -X POST http://127.0.0.1:${port}/cancel`,
+        `  快捷  node neptune.mjs chargeon <设备号> <插座号>   # 预约下一个 6:30`,
+        `  查看  curl http://127.0.0.1:${port}/status   或   node neptune.mjs status`,
+        `  取消  node neptune.mjs chargeon cancel`,
         CONFIG.serveToken
           ? "  已启用令牌校验（请求头 X-Token）"
           : "  ⚠️ 未设置 serveToken：能访问此端口的人都可以预约（消耗你的余额），公网部署请配置令牌或防火墙",
@@ -740,7 +799,8 @@ if (!actions[cmd]) {
       "  parse     从链接解析 openId 等字段（只打印，不写配置）\n" +
       "  status    余额 / 充电订单 / 端口状态\n" +
       "  start     开电（用配置里的桩位，幂等，带重试窗口）\n" +
-      "  chargeon  一问一答快速开电（chargeon [设备号] [插座号]）\n" +
+      "  chargeon  预约下一个 6:30 自动开电（chargeon [设备号] [插座号]）\n" +
+      "            chargeon now [设备号] [插座号] = 立即开电；chargeon cancel = 取消预约\n" +
       "  stop      结束充电\n" +
       "  serve     预约服务器：POST {time,设备号,插座号} 到点自动开电（serve [端口]）\n" +
       "  install   一键写入 crontab 每日定时（install [HH:MM] [周几]）"
@@ -748,7 +808,7 @@ if (!actions[cmd]) {
   process.exit(2);
 }
 try {
-  process.exit((await actions[cmd](process.argv[3], process.argv[4])) ?? 0);
+  process.exit((await actions[cmd](process.argv[3], process.argv[4], process.argv[5], process.argv[6])) ?? 0);
 } catch (err) {
   console.log(`执行出错：${err.message}`);
   process.exit(1);

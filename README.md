@@ -43,27 +43,30 @@ $ node neptune.mjs chargeon
 
 也可一行带参：`node neptune.mjs chargeon 50359162 04`。
 
-## 预约开电（最简服务器版）
+## 服务器预约开电（SSH 三步 + 每天一条命令）
 
-在任意常开的服务器上跑一个极简预约服务，把预约"发"给它：
-
-```bash
-node neptune.mjs serve            # 默认端口 7755，nohup/pm2 常驻均可
-```
-
-预约 / 查看 / 取消（curl 即可，方便接微信推送、TG bot、手机快捷指令）：
+**一次性部署**（SSH 到服务器）：
 
 ```bash
-curl -X POST http://127.0.0.1:7755/at -H 'Content-Type: application/json' \
-  -d '{"time":"11-08 06:35","devaddress":"50359162","port":"04"}'
-curl http://127.0.0.1:7755/status
-curl -X POST http://127.0.0.1:7755/cancel
+scp -r ~/neptune-charge server:~/      # 仓库连本地配置一起带过去（自己的服务器，没问题）
+ssh server
+cd ~/neptune-charge && node neptune.mjs login     # 若配置没带过去，交互配置一次
+nohup node neptune.mjs serve > neptune.log 2>&1 & # 常驻预约服务（服务器需有 Node 18+）
 ```
 
-- `time` 支持 `"HH:MM"`（最近的未来，今晚设明早开）、`"MM-DD HH:MM"`、`"YYYY-MM-DD HH:MM"`；`devaddress/port` 省略时用已配置桩位
-- 到点自动执行 `start`：幂等 + 15 分钟重试窗口（不怕桩 6:35 才上线），结果经 Server酱推送到微信（配置 `serverChanKey`）
-- 同一时间只保留一条预约，新预约覆盖旧的；过期超 1 小时的预约会被丢弃
-- ⚠️ 公网部署请设置 `"serveToken"` 并在请求带 `X-Token` 头（或防火墙限端口）—— 预约会消耗你的余额
+**之后每次睡前，SSH 上去一条命令**（时间不用写，自动取下一个 6:30）：
+
+```bash
+node neptune.mjs chargeon 50359162 04      # 预约下一个 6:30 自动开电
+node neptune.mjs chargeon now 50359162 04  # 插上就想马上充：立即开电
+node neptune.mjs chargeon cancel           # 取消预约
+node neptune.mjs status                    # 看余额 / 在充状态
+```
+
+- `chargeon` 在早上 10 点前运行都算"今天早上这轮"，其余时间算明天
+- serve 到点自动执行：幂等 + 15 分钟重试窗口（桩 6:35 才上线也不怕），结果经 Server酱推微信（配置 `serverChanKey`）
+- curl 接口同样可用：`POST /at {time,devaddress,port}`、`GET /status`、`POST /cancel`（方便接 bot / 手机快捷指令）
+- ⚠️ 公网部署设 `"serveToken"`（请求带 `X-Token` 头）或防火墙限端口 —— 预约消耗你的余额
 
 ## 其他命令
 
