@@ -49,7 +49,9 @@ $ node neptune.mjs chargeon
 node neptune.mjs install 6:30 1-5   # 工作日 6:30；省略参数 = 每天 6:30
 ```
 
-自动写入 crontab（处理好绝对路径、`CRON_TZ=Asia/Shanghai` 时区、日志文件），重复执行更新旧条目、不重复堆积。`start` 幂等：到点已有订单自动跳过，余额不足拒绝并记入日志。睡前插好充电器即可。
+自动写入 crontab（处理好绝对路径、`CRON_TZ=Asia/Shanghai` 时区、日志文件），重复执行更新旧条目、不重复堆积。
+
+**不怕桩没开门**：设备实际上线时间常在 6:35 左右，`start` 失败后每 30 秒自动重试，默认窗口 15 分钟（配置 `retryMinutes` 或环境变量 `NPD_RETRY_MINUTES` 调整）。`start` 幂等：到点已有订单自动跳过，余额不足拒绝并记入日志。睡前插好充电器即可。
 
 **服务器部署**：本地 `login` 后把 `neptune.config.local.json` 拷到服务器同目录并 `chmod 600`（或用环境变量）。想收到成功/失败推送，配置里加 `"serverChanKey": "SCTxxxx"`（[Server酱](https://sct.ftqq.com) 免费申请），结果自动推到微信。
 

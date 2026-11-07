@@ -45,6 +45,7 @@ const CONFIG = {
   port: process.env.NPD_PORT || LOCAL.port || "",
   money: process.env.NPD_MONEY || LOCAL.money || "7", // 页面"开始充电"时的 money 选项（抓包原值，对应预付 ¥2）
   serverChanKey: process.env.NPD_SERVERCHAN_KEY || LOCAL.serverChanKey || "", // Server酱 SendKey（可选，开电结果推送到微信）
+  retryMinutes: Number(process.env.NPD_RETRY_MINUTES ?? LOCAL.retryMinutes ?? 15), // start 失败重试窗口（分钟），应对桩未到营业时间
 };
 
 function requireAccount() {
@@ -361,7 +362,8 @@ async function cmdStatus() {
 
 async function cmdStart() {
   requireAccount();
-  return startCharging(CONFIG.devaddress, CONFIG.port);
+  // start 是给定时任务用的：失败自动重试（默认 15 分钟窗口，覆盖桩实际 6:35 左右才上线的情况）
+  return startCharging(CONFIG.devaddress, CONFIG.port, CONFIG.retryMinutes);
 }
 
 /** 一问一答快速开电：现场问设备号/插座号，用已配置账号的余额 */
@@ -376,89 +378,120 @@ async function cmdChargeOn(devArg, portArg) {
   } finally {
     rl?.close();
   }
-  if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
-    console.log("❌ 格式不对：设备号应为≥6位数字，插座号为两位数字。");
-    return 1;
-  }
-  return startCharging(devaddress, port);
-}
-
-/** 核心开电流程：start（配置里的桩）与 chargeon（现场问桩号）共用 */
-async function startCharging(devaddress, port) {
-  const ch = await isCharging();
-  if (ch) {
-    console.log(`已有充电订单（插座 ${ch.devport}，${ch.begindt} 开始），跳过开电。`);
-    return 0;
+    if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
+      console.log("❌ 格式不对：设备号应为≥6位数字，插座号为两位数字。");
+      return 1;
+    }
+    return startCharging(devaddress, port, 0); // 人在场，失败立即报，不拖重试
   }
 
-  const [dev, user] = await Promise.all([getDeviceInfo(devaddress), getUserInfo()]);
-  const balance = user.readyaccountmoney ?? 0;
-  console.log(
-    `本次开电：设备 ${devaddress} 插座 ${port}（${dev.devdescript ?? "未知设备"}，账号 id=${user.employeeid ?? "?"}，余额 ${yuan(balance)}）`
-  );
-  if (balance < 200) {
-    console.log(`余额不足（${yuan(balance)}，开电需预扣约 ¥2），中止。`);
-    await push("尼普顿开电中止", `余额不足（${yuan(balance)}），请充值后重试`);
-    return 1;
-  }
+/** 核心开电流程：start（配置里的桩）与 chargeon（现场问桩号）共用
+ *  retryMinutes > 0 时失败自动重试（每 30 秒一次），应对桩未营业/设备未上线（如 6:30 定时但实际 6:35 才开） */
+async function startCharging(devaddress, port, retryMinutes = 0) {
+  const deadline = Date.now() + retryMinutes * 60_000;
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    const ch = await isCharging();
+    if (ch) {
+      if (attempt === 1) console.log(`已有充电订单（插座 ${ch.devport}，${ch.begindt} 开始），跳过开电。`);
+      else console.log(`检测到订单已创建（插座 ${ch.devport}），视为开电成功。`);
+      return 0;
+    }
 
-  const base = {
-    devaddress,
-    port,
-    money: CONFIG.money,
-    areaId: CONFIG.areaId,
-    openId: CONFIG.openId,
-    beforemoney: balance,
-    devtypeid: dev.devtypeid ?? 40,
-    fullStop: 0,
-    payType: 1,
-    safeOpen: 0,
-    safeCharge: dev.safeCharge ?? 9,
-    edtType: 0,
-    efee: dev.efee ?? 110,
-    eCharge: dev.eCharge ?? 55,
-    serviceCharge: dev.serviceCharge ?? 55,
-    userId: 0,
-    yuan7: 0,
-  };
+    const [dev, user] = await Promise.all([getDeviceInfo(devaddress), getUserInfo()]);
+    const balance = user.readyaccountmoney ?? 0;
+    if (attempt === 1) {
+      console.log(
+        `本次开电：设备 ${devaddress} 插座 ${port}（${dev.devdescript ?? "未知设备"}，账号 id=${user.employeeid ?? "?"}，余额 ${yuan(balance)}）`
+      );
+    }
+    if (balance < 200) {
+      console.log(`余额不足（${yuan(balance)}，开电需预扣约 ¥2），中止。`);
+      await push("尼普顿开电中止", `余额不足（${yuan(balance)}），请充值后重试`);
+      return 1;
+    }
+    if (dev.isWorkTime === 0) console.log(`设备未在营业时间（${dev.workTime ?? "?"}），仍尝试提交…`);
 
-  let r = await post("beginCharge", base);
-  if (!r.success) {
-    console.log(`开电失败：${r.msg}`);
-    await push("尼普顿开电失败", r.msg ?? "未知错误");
-    return 1;
-  }
-  const msgflag = r.obj;
-  console.log(`指令已下发（流水 ${msgflag}），等待设备确认…`);
+    const base = {
+      devaddress,
+      port,
+      money: CONFIG.money,
+      areaId: CONFIG.areaId,
+      openId: CONFIG.openId,
+      beforemoney: balance,
+      devtypeid: dev.devtypeid ?? 40,
+      fullStop: 0,
+      payType: 1,
+      safeOpen: 0,
+      safeCharge: dev.safeCharge ?? 9,
+      edtType: 0,
+      efee: dev.efee ?? 110,
+      eCharge: dev.eCharge ?? 55,
+      serviceCharge: dev.serviceCharge ?? 55,
+      userId: 0,
+      yuan7: 0,
+    };
 
-  let result = null;
-  for (let i = 1; i <= RETRY_POLL; i++) {
-    await sleep(POLL_INTERVAL);
-    result = await post("beginCharge", { ...base, msgflag });
-    if (result.success) break;
-    if ((result.msg ?? "").includes("设备无响应")) {
-      console.log(`设备无响应，第 ${i}/${RETRY_POLL} 次重试…`);
+    let r = await post("beginCharge", base);
+    if (!r.success) {
+      if (Date.now() < deadline) {
+        console.log(
+          `开电失败（${r.msg}），30 秒后重试（窗口剩余 ${Math.max(1, Math.ceil((deadline - Date.now()) / 60000))} 分钟）…`
+        );
+        await sleep(30_000);
+        continue;
+      }
+      console.log(`开电失败：${r.msg}`);
+      await push("尼普顿开电失败", r.msg ?? "未知错误");
+      return 1;
+    }
+    const msgflag = r.obj;
+    console.log(`指令已下发（流水 ${msgflag}），等待设备确认…`);
+
+    let result = null;
+    for (let i = 1; i <= RETRY_POLL; i++) {
+      await sleep(POLL_INTERVAL);
+      result = await post("beginCharge", { ...base, msgflag });
+      if (result.success) break;
+      console.log(`设备无响应，第 ${i}/${RETRY_POLL} 次轮询…`);
+    }
+
+    if (result?.success) {
+      const obj = result.obj ?? {};
+      console.log(
+        `✅ 开始充电成功：设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，` +
+          `预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟`
+      );
+      await push(
+        "尼普顿开电成功",
+        `设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，余额 ${yuan(user.readyaccountmoney)}` +
+          (attempt > 1 ? `（重试 ${attempt - 1} 次后成功）` : "")
+      );
+      return 0;
+    }
+
+    // 设备未确认：可能订单已建但设备未上线，查一下订单再决定是否进入重试
+    const pending = await isCharging();
+    if (pending) {
+      console.log(`订单已创建（插座 ${pending.devport}），设备尚未确认，继续观察…`);
+      if (Date.now() < deadline) {
+        await sleep(30_000);
+        continue;
+      }
+      console.log("订单已创建但设备长时间未确认，稍后可用 status 查看。");
+      return 0;
+    }
+    if (Date.now() < deadline) {
+      console.log(
+        `设备持续无响应，30 秒后重试（窗口剩余 ${Math.max(1, Math.ceil((deadline - Date.now()) / 60000))} 分钟）…`
+      );
       continue;
     }
-    console.log(`开电失败：${result.msg}`);
-    return 1;
-  }
-  if (!result?.success) {
     console.log("设备持续无响应，开电失败。请检查充电器是否插好。");
     await push("尼普顿开电失败", "设备持续无响应，请检查充电器是否插好");
     return 1;
   }
-
-  const obj = result.obj ?? {};
-  console.log(
-    `✅ 开始充电成功：设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，` +
-      `预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟`
-  );
-  await push(
-    "尼普顿开电成功",
-    `设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，余额 ${yuan(user.readyaccountmoney)}`
-  );
-  return 0;
 }
 
 async function cmdStop() {
