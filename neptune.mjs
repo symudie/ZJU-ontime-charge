@@ -533,10 +533,80 @@ async function cmdLogin() {
   }
 }
 
+// ============================ 链接解析 ============================
+
+/** 从充电页链接/一次性 code 链接/裸 openId 中解析账号字段，只打印不写配置 */
+async function cmdParse(rawLink) {
+  const link = (rawLink || "").trim().replace(/&amp;/g, "&");
+  if (!link) {
+    console.log("用法: node neptune.mjs parse \"<充电页链接或openId>\"");
+    return 2;
+  }
+
+  let openId = "";
+  let employeeId = "";
+  let areaId = CONFIG.areaId;
+  let accountmoney = "";
+
+  if (/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/.test(link)) {
+    console.log(
+      "❌ 这是微信 OAuth 授权中间页，里面没有 openId。\n" +
+        "它只能由微信客户端完成授权：在微信里点开会跳到真正的充电页，\n" +
+        "等充电页完整显示后再复制 szlzxn.cn/wx/indexn.html?openId=… 那条链接。"
+    );
+    return 1;
+  }
+
+  const oneTimeCode = (link.match(/[?&]code=([\w-]+)/) || [])[1];
+  if (oneTimeCode && /szlzxn\.cn\/wxn\/getOpenId/.test(link)) {
+    console.log("检测到一次性授权 code，尝试换取 openId…（code 约 5 分钟有效且可能已被消费）");
+    try {
+      const resp = await fetch(
+        `${BASE}/getOpenId?code=${oneTimeCode}&state=${encodeURIComponent("{'areaid':6}")}`,
+        { redirect: "manual", headers: { "User-Agent": UA } }
+      );
+      const loc = resp.headers.get("location") || "";
+      const u = new URL(loc);
+      openId = u.searchParams.get("openId") || "";
+      employeeId = u.searchParams.get("employeeId") || "";
+      areaId = u.searchParams.get("areaid") || areaId;
+    } catch {
+      openId = "";
+    }
+    if (!openId) {
+      console.log("❌ code 换取失败（已被微信消费过或已过期）。");
+      return 1;
+    }
+  } else {
+    try {
+      const u = new URL(link);
+      openId = u.searchParams.get("openId") || "";
+      employeeId = u.searchParams.get("employeeId") || "";
+      areaId = u.searchParams.get("areaid") || u.searchParams.get("areaId") || areaId;
+      accountmoney = u.searchParams.get("accountmoney") || "";
+    } catch {
+      openId = link;
+    }
+  }
+
+  if (!openId) {
+    console.log("❌ 未解析到 openId。请粘贴充电页完整链接（…indexn.html?openId=…）或裸 openId。");
+    return 1;
+  }
+  console.log("解析结果：");
+  console.log(`  openId      = ${openId}`);
+  if (employeeId) console.log(`  employeeId  = ${employeeId}`);
+  if (areaId) console.log(`  areaId      = ${areaId}`);
+  if (accountmoney) console.log(`  余额(参考)  = ${yuan(accountmoney)}`);
+  console.log("\n提示：openId 等同账号支付钥匙，请勿外传。");
+  return 0;
+}
+
 // ============================ 入口 ============================
 
 const actions = {
   login: cmdLogin,
+  parse: cmdParse,
   status: cmdStatus,
   start: cmdStart,
   stop: cmdStop,
@@ -546,8 +616,9 @@ const actions = {
 const cmd = process.argv[2] ?? "status";
 if (!actions[cmd]) {
   console.log(
-    "用法: node neptune.mjs <login|status|start|stop|stations|watch [分钟]>\n" +
+    "用法: node neptune.mjs <login|parse|status|start|stop|stations|watch [分钟]>\n" +
       "  login    配置向导：粘贴充电页链接即可完成配置（推荐新用户从这里开始）\n" +
+      "  parse    从链接里解析 openId 等字段（只打印，不写配置）\n" +
       "  status   本人余额/订单/端口（需账号配置）\n" +
       "  start    幂等开电（需账号配置）\n" +
       "  stop     幂等断电（需账号配置）\n" +
@@ -555,6 +626,12 @@ if (!actions[cmd]) {
       "  watch    持续监视（默认 5 分钟/轮，空出插座弹系统通知，无需账号）"
   );
   process.exit(2);
+}
+try {
+  process.exit((await actions[cmd](cmd === "parse" ? process.argv[3] : process.argv[3])) ?? 0);
+} catch (err) {
+  console.log(`执行出错：${err.message}`);
+  process.exit(1);
 }
 try {
   process.exit((await actions[cmd](process.argv[3])) ?? 0);
