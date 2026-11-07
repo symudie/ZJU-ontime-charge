@@ -60,10 +60,7 @@ node neptune.mjs chargeon cancel           # 取消预约
 node neptune.mjs status                    # 看余额 / 在充状态
 ```
 
-- `chargeon` 在早上 10 点前运行都算"今天早上这轮"，其余时间算明天
-- serve 到点自动执行：幂等 + 15 分钟重试窗口（桩 6:35 才上线也不怕）
-- curl 接口同样可用：`POST /at {time,devaddress,port}`、`GET /status`、`POST /cancel`（方便接 bot / 手机快捷指令）
-- ⚠️ 公网部署设 `"serveToken"`（请求带 `X-Token` 头）或防火墙限端口 —— 预约消耗你的余额
+- 我们提供了一个15分钟的轮询窗口，充电桩在6.45之前上线都可以正常充上电。
 
 ## 其他命令
 
@@ -74,7 +71,7 @@ node neptune.mjs stop     # 结束充电（退款约 30 秒到账）
 
 ## 说明
 
-- 扣费为账户预存款（开电预扣约 ¥2，停止/充满后按实际用量结算）。
+- 扣费为账户预存款。
 - 仅供学习交流与**本人账号**自用自动化；勿操作他人设备、勿高频请求；接口为非官方逆向，随时可能变更。
 - 也可手动配置：复制 `neptune.config.local.example.json` 为 `neptune.config.local.json` 编辑。
 
