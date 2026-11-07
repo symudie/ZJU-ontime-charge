@@ -42,19 +42,7 @@ https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accoun
 
 ## 日常开电：chargeon
 
-在想要预约的前一天晚上执行（自动取下一个 6:30）：
-
-```console
-$ node neptune.mjs chargeon 50359162 04
-✅ 已预约 2026-11-08 06:30 自动开电：设备 50359162 插座 04
-取消：node neptune.mjs chargeon cancel
-```
-
-## 服务器预约开电
-
-**一次性部署**：
-
-之后在你想要预约的前一天晚上，执行：
+在想要预约的前一天晚上执行：
 
 ```bash
 node neptune.mjs chargeon 50359162 04    # 预约下一个 6:30 自动开电
@@ -63,12 +51,6 @@ node neptune.mjs status                    # 看余额 / 在充状态
 ```
 
 - 我们提供了一个15分钟的轮询窗口，充电桩在6.45之前上线都可以正常充上电。
-
-想在服务器上直接敲 `chargeon`（免敲 node 前缀）？装一次命令别名：
-
-```bash
-mkdir -p ~/.local/bin && printf '#!/bin/bash\nnode "$HOME/ZJU-ontime-charge/neptune.mjs" chargeon "$@"\n' > ~/.local/bin/chargeon && chmod +x ~/.local/bin/chargeon
-```
 
 ## 其他命令
 
