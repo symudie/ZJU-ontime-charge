@@ -33,15 +33,13 @@ https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accoun
 
 ## 日常开电：chargeon
 
-```console
-$ node neptune.mjs chargeon
-设备编号: 50359162
-插座号: 04
-本次开电：设备 50359162 插座 04（浙大玉泉曹光彪wd12a6，账号 id=1668794，余额 ¥6.55）
-✅ 开始充电成功：设备 50359162 插座 04，20261107182814 起，预扣 ¥2.00，最长 480 分钟
-```
+在想要预约的前一天晚上执行（自动取下一个 6:30）：
 
-也可一行带参：`node neptune.mjs chargeon 50359162 04`。
+```console
+$ node neptune.mjs chargeon 50359162 04
+✅ 已预约 2026-11-08 06:30 自动开电：设备 50359162 插座 04
+取消：node neptune.mjs chargeon cancel
+```
 
 ## 服务器预约开电
 
@@ -55,8 +53,7 @@ cd ZJU-ontime-charge && node neptune.mjs login     # clone 不含本地配置，
 之后在你想要预约的前一天晚上，执行：
 
 ```bash
-node neptune.mjs chargeon                 # 预约下一个 6:30（用配置里的桩位）
-node neptune.mjs chargeon 50359162 04    # 或指定别的桩位
+node neptune.mjs chargeon 50359162 04    # 预约下一个 6:30 自动开电
 node neptune.mjs chargeon cancel           # 取消预约
 node neptune.mjs status                    # 看余额 / 在充状态
 ```
@@ -80,7 +77,7 @@ node neptune.mjs stop     # 结束充电（退款约 30 秒到账）
 
 - 扣费为账户预存款。
 - 仅供学习交流与**本人账号**自用自动化；勿操作他人设备、勿高频请求；接口为非官方逆向，随时可能变更。
-- 也可手动配置：复制 `neptune.config.local.example.json` 为 `neptune.config.local.json` 编辑，或直接按上面的字段创建。
+- 也可手动配置：创建 `neptune.config.local.json`，字段：`openId` / `employeeId`（可选：`areaId`、`money`、`retryMinutes`、`serveToken`）。桩位在每次 `chargeon` 时给出。
 
 ## License
 
