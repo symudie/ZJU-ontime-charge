@@ -73,7 +73,7 @@ node neptune.mjs stop     # 结束充电（退款约 30 秒到账）
 
 - 扣费为账户预存款。
 - 仅供学习交流与**本人账号**自用自动化；勿操作他人设备、勿高频请求；接口为非官方逆向，随时可能变更。
-- 也可手动配置：创建 `neptune.config.local.json`，字段：`openId` / `employeeId` / `devaddress` / `port`（可选：`areaId`、`money`、`retryMinutes`、`serveToken`）。
+- 也可手动配置：复制 `neptune.config.local.example.json` 为 `neptune.config.local.json` 编辑，或直接按上面的字段创建。
 
 ## License
 
