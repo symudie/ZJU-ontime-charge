@@ -73,8 +73,6 @@ node neptune.mjs status                    # 看余额 / 在充状态
 ```bash
 node neptune.mjs status   # 余额 / 充电订单 / 端口状态
 node neptune.mjs stop     # 结束充电（退款约 30 秒到账）
-node neptune.mjs parse    # 从链接解析 openId（只打印不写配置）
-node neptune.mjs install  # （可选）每天固定时间开电的 crontab 安装器
 ```
 
 ## 说明
