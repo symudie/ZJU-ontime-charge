@@ -27,7 +27,9 @@ node neptune.mjs login    # ① 配置向导，一次即可
 https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accountmoney=…#/
 ```
 
-请注意千万不要泄漏相关参数（尤其 openId），不然会导致无故扣钱。`login` 会把这些参数自动写进配置文件 `neptune.config.local.json`（已被 .gitignore 排除，不会上传 GitHub），无需手动创建。
+请注意千万不要泄漏相关参数。
+
+理论上执行login之后会自动生成配置文件，若你喜欢抓包也可以自行修改，而后把 .example给去除拼成`neptune.config.local.json`。
 
 ## 日常开电：chargeon
 
