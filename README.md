@@ -17,6 +17,17 @@
 
 ## 配置
 
+**推荐：配置向导（约 30 秒，无需抓包）**
+
+```bash
+node neptune.mjs login
+```
+
+按提示三步操作：微信里打开充电页 → 右上角 `⋯` → **复制链接** → 粘贴回车。向导会自动解析你的 openId、校验账号、并从你本月的充电记录里**自动列出用过的桩和常用插座**供选择，最后写入本地配置文件。
+
+<details>
+<summary>手动配置（备用）</summary>
+
 复制模板并填入**你自己的**账号信息：
 
 ```bash
@@ -26,15 +37,17 @@ cp neptune.config.local.example.json neptune.config.local.json
 
 | 字段 | 含义 | 获取方式 |
 |---|---|---|
-| `openId` | 你的微信 openid（系统唯一身份） | 抓包一次充电页请求 |
-| `devaddress` | 桩设备号（桩身二维码对应） | 同上 |
+| `openId` | 你的微信 openid（系统唯一身份） | 充电页链接 `openId=` 参数，或抓包 |
+| `devaddress` | 桩设备号（桩身二维码对应） | 同上，或桩身标签 |
 | `port` | 你常用的插座口（两位） | 同上 |
 | `employeeId` | 数字用户 id | 同上（仅断电时用到） |
 | `money` | 页面"开始充电"发送的金额选项 | 抓包原值（对应预扣 ¥2） |
 
+</details>
+
 也可以用环境变量代替：`NPD_OPEN_ID`、`NPD_DEVADDRESS`、`NPD_PORT`、`NPD_EMPLOYEE_ID`、`NPD_MONEY`、`NPD_AREA_ID`。
 
-**`neptune.config.local.json` 已被 `.gitignore` 排除，请勿把含真实 openId 的配置提交到任何仓库。**
+**`neptune.config.local.json` 已被 `.gitignore` 排除，请勿把含真实 openId 的配置提交到任何仓库。openId 等同账号支付钥匙（拿到它即可用你的余额充电），同样不要分享给他人。**
 
 ## 定时开电
 

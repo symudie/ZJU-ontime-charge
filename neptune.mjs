@@ -16,12 +16,13 @@
 // crontab 示例（周一到周五 6:30 自动开电）：
 //   30 6 * * 1-5 /usr/bin/env node /path/to/neptune.mjs start >> /tmp/neptune.log 2>&1
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { URLSearchParams } from "node:url";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createInterface } from "node:readline/promises";
 
 const execFileAsync = promisify(execFile);
 
@@ -389,9 +390,113 @@ async function cmdStop() {
   return 1;
 }
 
+// ============================ 配置向导 ============================
+
+const CONFIG_FILE = join(dirname(fileURLToPath(import.meta.url)), "neptune.config.local.json");
+
+// stdin 关闭（EOF/管道输入耗尽）时返回空串而不是抛异常
+const ask = (rl, q) => rl.question(q).then((v) => (v ?? "").trim()).catch(() => "");
+
+async function cmdLogin() {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log(
+      [
+        "",
+        "配置向导（约 30 秒，全程无需抓包）：",
+        "  第 1 步：微信里打开你的充电页（平时扫码充电的那个页面）",
+        "  第 2 步：点右上角 ⋯ → 「复制链接」",
+        "  第 3 步：把链接粘贴到下面（链接里有你的专属 openId，等同账号钥匙，仅存本机、勿外传）",
+        "",
+      ].join("\n")
+    );
+    const link = await ask(rl, "粘贴链接: ");
+
+    let openId = "";
+    let employeeId = "";
+    let areaId = CONFIG.areaId;
+    try {
+      const u = new URL(link);
+      openId = u.searchParams.get("openId") || "";
+      employeeId = u.searchParams.get("employeeId") || "";
+      areaId = u.searchParams.get("areaid") || u.searchParams.get("areaId") || areaId;
+    } catch {
+      /* 不是 URL，退化为纯 openId 输入 */
+      openId = link;
+    }
+    if (!openId) {
+      console.log("❌ 未能从输入中解析 openId，请确认复制的是充电页链接。");
+      return 1;
+    }
+
+    const user = (await post("getUserInfo", { openId, areaId })).obj;
+    if (!user?.employeeid) {
+      console.log("❌ openId 无效或账号不存在，请重新复制链接。");
+      return 1;
+    }
+    employeeId = employeeId || String(user.employeeid);
+    console.log(`✅ 账号有效：id=${employeeId}，余额 ${yuan(user.readyaccountmoney)}`);
+
+    // 从充电历史自动发现常用桩与插座
+    const now = new Date();
+    const term = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const log = (await post("getChargeLog", { employeeid: employeeId, term })).obj ?? [];
+    const usage = new Map(); // devaddress -> { count, ports: Map(port->count) }
+    for (const rec of log) {
+      const addr = String(rec.devaddress);
+      const port = String(rec.devport).padStart(2, "0");
+      const item = usage.get(addr) ?? { count: 0, ports: new Map() };
+      item.count += 1;
+      item.ports.set(port, (item.ports.get(port) ?? 0) + 1);
+      usage.set(addr, item);
+    }
+    const devList = [...usage.entries()].sort((a, b) => b[1].count - a[1].count);
+
+    let devaddress = "";
+    let port = "";
+    if (devList.length) {
+      console.log("\n检测到你近期用过的充电桩：");
+      const infos = [];
+      for (let i = 0; i < devList.length && i < 5; i++) {
+        const [addr, info] = devList[i];
+        const dev = await getDeviceInfo(addr);
+        const topPort = [...info.ports.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        infos.push({ addr, topPort });
+        console.log(
+          `  ${i + 1}. ${dev.devdescript ?? `设备 ${addr}`}（设备号 ${addr}，本月 ${info.count} 次，常用插座 ${topPort}）`
+        );
+      }
+      const pick = Number((await ask(rl, "选择你的桩（序号，回车=1）: ")) || "1") - 1;
+      const chosen = infos[pick] ?? infos[0];
+      devaddress = chosen.addr;
+      port = (await ask(rl, `插座号（两位，回车=${chosen.topPort}）: `)) || chosen.topPort;
+    } else {
+      console.log("\n没查到本月充电记录，请手动输入（设备号一般印在桩身标签上）：");
+      devaddress = await ask(rl, "设备号: ");
+      port = await ask(rl, "插座号（两位，如 04）: ");
+    }
+    if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
+      console.log("❌ 设备号/插座号格式不对（设备号≥6位数字，插座号两位数字）。");
+      return 1;
+    }
+
+    const merged = { ...LOCAL, areaId, openId, employeeId, devaddress, port, money: LOCAL.money || "7" };
+    writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n");
+    console.log(
+      `\n✅ 配置已写入 neptune.config.local.json（该文件已被 .gitignore 排除）\n` +
+        `现在可以运行：node neptune.mjs status / start / stop\n` +
+        `⚠️ openId 等同账号支付钥匙（拿到它就能用你的余额充电），请勿外传。`
+    );
+    return 0;
+  } finally {
+    rl.close();
+  }
+}
+
 // ============================ 入口 ============================
 
 const actions = {
+  login: cmdLogin,
   status: cmdStatus,
   start: cmdStart,
   stop: cmdStop,
@@ -401,7 +506,8 @@ const actions = {
 const cmd = process.argv[2] ?? "status";
 if (!actions[cmd]) {
   console.log(
-    "用法: node neptune.mjs <status|start|stop|stations|watch [分钟]>\n" +
+    "用法: node neptune.mjs <login|status|start|stop|stations|watch [分钟]>\n" +
+      "  login    配置向导：粘贴充电页链接即可完成配置（推荐新用户从这里开始）\n" +
       "  status   本人余额/订单/端口（需账号配置）\n" +
       "  start    幂等开电（需账号配置）\n" +
       "  stop     幂等断电（需账号配置）\n" +
