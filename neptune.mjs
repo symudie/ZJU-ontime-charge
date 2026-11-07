@@ -25,10 +25,6 @@ import { createInterface } from "node:readline/promises";
 const execFileAsync = promisify(execFile);
 
 const BASE = "http://www.szlzxn.cn/wxn";
-const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-  "(KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 " +
-  "NetType/WIFI MicroMessenger/7.0.20.1781(0x6700143B) MacWechat/3.8.7(0x13080712)";
 
 // ===== 账号配置加载：环境变量优先，其次本地配置文件（不入库） =====
 function loadLocalConfig() {
@@ -90,11 +86,7 @@ async function post(path, data) {
     try {
       const resp = await fetch(`${BASE}/${path}`, {
         method: "POST",
-        headers: {
-          "User-Agent": UA,
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-          Origin: "http://www.szlzxn.cn",
-        },
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
         body,
       });
       return await resp.json();
