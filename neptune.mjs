@@ -231,11 +231,16 @@ async function cmdLogin() {
 }
 
 // ---- chargeon：预约下一个 6:30（now=立即，cancel=取消）----
+// 北京时间（UTC+8）锚定：服务器时区无关。10 点前（北京）算今天这轮，否则算明天
 function nextChargeTime() {
-  const now = new Date();
-  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 30);
-  if (t <= now && now.getHours() >= 10) t.setDate(t.getDate() + 1); // 10 点前都算今天这轮
-  return t;
+  const bj = new Date(Date.now() + 8 * 3600_000); // 用 getUTC* 读出北京墙钟
+  let target = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate(), 6 - 8, 30);
+  if (target <= Date.now() && bj.getUTCHours() >= 10) target += 86400_000;
+  return new Date(target);
+}
+function bjFormat(t) {
+  const b = new Date(t.getTime() + 8 * 3600_000);
+  return `${b.getUTCFullYear()}-${pad2(b.getUTCMonth() + 1)}-${pad2(b.getUTCDate())} ${pad2(b.getUTCHours())}:${pad2(b.getUTCMinutes())}`;
 }
 async function cmdChargeOn(...args) {
   requireOpenId();
@@ -253,7 +258,7 @@ async function cmdChargeOn(...args) {
     return 1;
   }
   const t = nextChargeTime();
-  const timeLocal = `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
+  const timeLocal = bjFormat(t);
   saveAppointments([{ time: t.toISOString(), timeLocal, devaddress, port, bookedAt: new Date().toISOString() }]);
   ensureServeRunning();
   console.log(`✅ 已预约 ${timeLocal} 自动开电：设备 ${devaddress} 插座 ${port}\n取消：node neptune.mjs chargeon cancel`);
