@@ -4,19 +4,21 @@
 //
 // 用法：
 //   node neptune.mjs login    # 配置向导（粘贴充电页链接，一次即可）
-//   node neptune.mjs start    # 开电（幂等：已在充电则跳过）——配合 crontab 做定时开电
+//   node neptune.mjs install  # 一键写入 crontab 定时开电（install [HH:MM] [周几]，如 install 6:30 1-5）
+//   node neptune.mjs start    # 开电（幂等：已在充电则跳过）
 //   node neptune.mjs stop     # 结束充电
 //   node neptune.mjs status   # 余额 / 充电订单 / 端口状态
 //   node neptune.mjs parse    # 从充电页链接解析 openId 等字段（只打印不写配置）
-//
-// 定时开电（crontab，周一到周五 6:30）：
-//   30 6 * * 1-5 /usr/bin/env node /path/to/neptune.mjs start >> /tmp/neptune.log 2>&1
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { URLSearchParams } from "node:url";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createInterface } from "node:readline/promises";
+
+const execFileAsync = promisify(execFile);
 
 const BASE = "http://www.szlzxn.cn/wxn";
 const UA =
@@ -41,6 +43,7 @@ const CONFIG = {
   devaddress: process.env.NPD_DEVADDRESS || LOCAL.devaddress || "",
   port: process.env.NPD_PORT || LOCAL.port || "",
   money: process.env.NPD_MONEY || LOCAL.money || "7", // 页面"开始充电"时的 money 选项（抓包原值，对应预付 ¥2）
+  serverChanKey: process.env.NPD_SERVERCHAN_KEY || LOCAL.serverChanKey || "", // Server酱 SendKey（可选，开电结果推送到微信）
 };
 
 function requireAccount() {
@@ -60,6 +63,20 @@ const POLL_INTERVAL = 3000; // 轮询间隔 ms
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const yuan = (fen) => `¥${((fen || 0) / 100).toFixed(2)}`;
+
+/** Server酱推送（未配置 key 时为空操作，失败不影响主流程） */
+async function push(title, desp) {
+  if (!CONFIG.serverChanKey) return;
+  try {
+    await fetch(`https://sctapi.ftqq.com/${CONFIG.serverChanKey}.send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ title, desp }).toString(),
+    });
+  } catch {
+    /* 忽略推送失败 */
+  }
+}
 
 async function post(path, data) {
   const body = new URLSearchParams(data).toString();
@@ -338,6 +355,7 @@ async function cmdStart() {
   const balance = user.readyaccountmoney ?? 0;
   if (balance < 200) {
     console.log(`余额不足（${yuan(balance)}，开电需预扣约 ¥2），中止。`);
+    await push("尼普顿开电中止", `余额不足（${yuan(balance)}），请充值后重试`);
     return 1;
   }
 
@@ -364,6 +382,7 @@ async function cmdStart() {
   let r = await post("beginCharge", base);
   if (!r.success) {
     console.log(`开电失败：${r.msg}`);
+    await push("尼普顿开电失败", r.msg ?? "未知错误");
     return 1;
   }
   const msgflag = r.obj;
@@ -383,6 +402,7 @@ async function cmdStart() {
   }
   if (!result?.success) {
     console.log("设备持续无响应，开电失败。请检查充电器是否插好。");
+    await push("尼普顿开电失败", "设备持续无响应，请检查充电器是否插好");
     return 1;
   }
 
@@ -390,6 +410,10 @@ async function cmdStart() {
   console.log(
     `✅ 开始充电成功：插座 ${CONFIG.port}，${obj.begindt ?? ""} 起，` +
       `预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟`
+  );
+  await push(
+    "尼普顿开电成功",
+    `插座 ${CONFIG.port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，余额 ${yuan(user.readyaccountmoney)}`
   );
   return 0;
 }
@@ -419,10 +443,56 @@ async function cmdStop() {
   const r2 = await post("offCharge", { ...base, count: 2, msgflag: r1.obj });
   if (r2.success) {
     console.log(`✅ 结束充电成功（插座 ${ch.devport}）。退款到账有约 30 秒延迟。`);
+    await push("尼普顿已断电", `插座 ${ch.devport}，退款稍后到账`);
     return 0;
   }
   console.log(`结束充电确认失败：${r2.msg}，请到微信里手动确认。`);
   return 1;
+}
+
+// ============================ 定时任务安装 ============================
+
+const MARK_BEGIN = "# BEGIN neptune-charge";
+const MARK_END = "# END neptune-charge";
+
+/** 一键把 start 写入 crontab：自动处理绝对路径、时区、日志，幂等（更新不重复堆积） */
+async function cmdInstall(timeArg, daysArg) {
+  const match = (timeArg || "").match(/^(\d{1,2}):(\d{2})$/);
+  const hh = String(Number(match ? match[1] : 6)).padStart(2, "0");
+  const mm = match ? match[2] : "30";
+  const days = daysArg && /^[\d*,\-/]+$/.test(daysArg) ? daysArg : "*"; // 默认每天，如 1-5 为工作日
+  const script = fileURLToPath(import.meta.url);
+  const log = join(dirname(script), "neptune.log");
+  const block = [
+    MARK_BEGIN,
+    "CRON_TZ=Asia/Shanghai",
+    `${mm} ${hh} * * ${days} ${process.execPath} ${script} start >> ${log} 2>&1`,
+    MARK_END,
+  ].join("\n");
+
+  let current = "";
+  try {
+    current = (await execFileAsync("crontab", ["-l"])).stdout;
+  } catch {
+    current = ""; // 当前用户没有 crontab
+  }
+  const cleaned = current
+    .replace(new RegExp(`${MARK_BEGIN}[\\s\\S]*?${MARK_END}\\n?`, "m"), "")
+    .trimEnd();
+  const next = (cleaned ? cleaned + "\n\n" : "") + block + "\n";
+
+  console.log("\n将写入以下定时任务（不影响 crontab 里的其他任务）：\n\n" + block + "\n");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const ok = (await ask(rl, "确认写入 crontab？(y/N): ")).toLowerCase() === "y";
+  rl.close();
+  if (!ok) {
+    console.log("已取消，未做任何修改。");
+    return 1;
+  }
+  await execFileAsync("crontab", ["-"], { input: next });
+  console.log("✅ 已安装。`crontab -l` 可查看，日志在同目录 neptune.log。");
+  await push("尼普顿定时任务已安装", `每天/每周计划：${hh}:${mm}（周${days}）自动开电`);
+  return 0;
 }
 
 // ============================ 入口 ============================
@@ -433,22 +503,24 @@ const actions = {
   status: cmdStatus,
   start: cmdStart,
   stop: cmdStop,
+  install: cmdInstall,
 };
 const cmd = process.argv[2] ?? "status";
 if (!actions[cmd]) {
   console.log(
     "浙江大学尼普顿定时开电\n" +
-      "用法: node neptune.mjs <login|parse|status|start|stop>\n" +
+      "用法: node neptune.mjs <login|parse|status|start|stop|install>\n" +
       "  login    配置向导：粘贴充电页链接即可完成配置（新用户从这里开始）\n" +
       "  parse    从链接解析 openId 等字段（只打印，不写配置）\n" +
       "  status   余额 / 充电订单 / 端口状态\n" +
-      "  start    开电（幂等，配合 crontab 做定时开电）\n" +
-      "  stop     结束充电"
+      "  start    开电（幂等，配合定时任务）\n" +
+      "  stop     结束充电\n" +
+      "  install  一键写入 crontab 定时开电（install [HH:MM] [周几]，如 install 6:30 1-5）"
   );
   process.exit(2);
 }
 try {
-  process.exit((await actions[cmd](process.argv[3])) ?? 0);
+  process.exit((await actions[cmd](process.argv[3], process.argv[4])) ?? 0);
 } catch (err) {
   console.log(`执行出错：${err.message}`);
   process.exit(1);

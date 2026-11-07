@@ -32,12 +32,12 @@ https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accoun
 ## 定时开电
 
 ```bash
-crontab -e
-# 周一到周五 6:30 自动开电（桩工作时间 6:00-24:00）
-30 6 * * 1-5 /usr/bin/env node /path/to/neptune.mjs start >> /tmp/neptune.log 2>&1
+node neptune.mjs install 6:30 1-5   # 工作日 6:30；省略参数 = 每天 6:30
 ```
 
-`start` 是幂等的：到点时已有充电订单自动跳过，余额不足拒绝并记入日志。睡前插好充电器即可。
+自动写入 crontab（处理好绝对路径、`CRON_TZ=Asia/Shanghai` 时区、日志文件），重复执行更新旧条目、不重复堆积。`start` 幂等：到点已有订单自动跳过，余额不足拒绝并记入日志。睡前插好充电器即可。
+
+**服务器部署**：本地 `login` 后把 `neptune.config.local.json` 拷到服务器同目录并 `chmod 600`（或用环境变量）。想收到成功/失败推送，配置里加 `"serverChanKey": "SCTxxxx"`（[Server酱](https://sct.ftqq.com) 免费申请），结果自动推到微信。
 
 ## 其他命令
 
