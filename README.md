@@ -6,6 +6,15 @@
 
 ## 快速上手
 
+首先克隆本仓库。
+
+```bash
+git clone https://github.com/symudie/ZJU-ontime-charge.git
+cd ZJU-ontime-charge 
+```
+
+进行登录操作。
+
 ```bash
 node neptune.mjs login    # ① 配置向导，一次即可
 ```
@@ -44,11 +53,6 @@ $ node neptune.mjs chargeon 50359162 04
 ## 服务器预约开电
 
 **一次性部署**：
-
-```bash
-git clone https://github.com/symudie/ZJU-ontime-charge.git
-cd ZJU-ontime-charge && node neptune.mjs login     # clone 不含本地配置，需交互配置一次（之后无需常驻进程，chargeon 自动管理执行器）
-```
 
 之后在你想要预约的前一天晚上，执行：
 

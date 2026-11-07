@@ -219,11 +219,9 @@ async function cmdLogin() {
     employeeId = employeeId || String(user.employeeid);
     console.log(`✅ 账号有效：id=${employeeId}，余额 ${yuan(user.readyaccountmoney)}`);
 
-    if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(port)) {
-      console.log("❌ 设备号/插座号格式不对。");
-      return 1;
-    }
     const merged = { ...LOCAL, areaId, openId, employeeId };
+    delete merged.devaddress;
+    delete merged.port;
     writeFileSync(join(DIR, "neptune.config.local.json"), JSON.stringify(merged, null, 2) + "\n");
     console.log(`\n✅ 配置已写入（该文件不入库）。预约开电：chargeon <设备号> <插座号>`);
     return 0;
@@ -452,7 +450,7 @@ const cmd = process.argv[2] ?? "status";
 if (!actions[cmd]) {
   console.log(
     "浙江大学尼普顿定时开电\n" +
-      "用法: node neptune.mjs <login|status|chargeon|start|stop|serve>\n" +
+      "用法: node neptune.mjs <login|status|chargeon|stop|serve>\n" +
       "  login     配置向导（一次即可）\n" +
       "  chargeon  预约下一个 6:30 自动开电：chargeon <设备号> <插座号>；chargeon cancel = 取消预约\n" +
       "  stop      结束充电\n" +
