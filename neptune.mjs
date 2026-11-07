@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // 浙江大学尼普顿定时开电：微信充电桩（szlzxn.cn 老系统）单文件工具
 // 协议由作者本人账号抓包还原，仅操作本人账号（扣账户预存款）。
-// 命令：login 配置 / chargeon 预约下一个6:30 / serve 预约服务器 / status / stop
+// 命令：login 配置 / chargeon 预约下一个6:30 / serve 执行器(自动拉起) / status / stop
 
 import { readFileSync, writeFileSync, openSync, closeSync } from "node:fs";
-import http from "node:http";
 import { URLSearchParams } from "node:url";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -26,7 +25,6 @@ const CONFIG = {
   employeeId: LOCAL.employeeId || "",
   money: LOCAL.money || "7", // 页面开电时的金额选项（对应预扣 ¥2）
   retryMinutes: Number(LOCAL.retryMinutes ?? 15), // 桩 6:35 才上线的重试窗口
-  serveToken: LOCAL.serveToken || "", // 公网部署的访问令牌（可选）
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -91,8 +89,8 @@ async function startCharging(devaddress, port, retryMinutes = 0) {
     if (ch) {
       console.log(
         attempt === 1
-          ? `已有充电订单（插座 ${ch.devport}，${ch.begindt} 开始），跳过。`
-          : `检测到订单已创建（插座 ${ch.devport}），视为成功。`
+          ? `已有充电订单（插座 ${ch.devport}，${ch.begindt} 开始）。`
+          : `检测到订单已创建（插座 ${ch.devport}）。`
       );
       return 0;
     }
@@ -107,7 +105,7 @@ async function startCharging(devaddress, port, retryMinutes = 0) {
       console.log(`余额不足（${yuan(balance)}），中止。`);
       return 1;
     }
-    if (dev.isWorkTime === 0) console.log(`设备未在营业时间（${dev.workTime ?? "?"}），仍尝试提交…`);
+    if (dev.isWorkTime === 0) console.log(`设备未在营业时间（${dev.workTime ?? "?"}）`);
 
     const base = {
       devaddress,
@@ -151,7 +149,7 @@ async function startCharging(devaddress, port, retryMinutes = 0) {
     if (result?.success) {
       const obj = result.obj ?? {};
       console.log(
-        `✅ 开电成功：设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟` +
+        `开电成功：设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟` +
           (attempt > 1 ? `（重试 ${attempt - 1} 次后成功）` : "")
       );
       return 0;
@@ -189,41 +187,29 @@ async function cmdLogin() {
     let employeeId = "";
     let areaId = CONFIG.areaId;
     if (/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/.test(link)) {
-      console.log("❌ 这是 OAuth 中间页，没有 openId。请在微信里等充电页完整显示后再复制链接。");
+      console.log("这是 OAuth 中间页，没有 openId。请在微信里等充电页完整显示后再复制链接。");
       return 1;
     }
-    const oneTimeCode = (link.match(/[?&]code=([\w-]+)/) || [])[1];
-    if (oneTimeCode && /szlzxn\.cn\/wxn\/getOpenId/.test(link)) {
-      console.log("检测到一次性 code，尝试换取 openId…");
-      try {
-        const resp = await fetch(`${BASE}/getOpenId?code=${oneTimeCode}&state=${encodeURIComponent("{'areaid':6}")}`, {
-          redirect: "manual",
-        });
-        openId = new URL(resp.headers.get("location") || "").searchParams.get("openId") || "";
-      } catch {}
-      if (!openId) return console.log("❌ code 已被消费或过期，请回到充电页重新取链接。"), 1;
-    } else {
-      try {
-        const u = new URL(link);
-        openId = u.searchParams.get("openId") || "";
-        employeeId = u.searchParams.get("employeeId") || "";
-        areaId = u.searchParams.get("areaid") || areaId;
-      } catch {
-        openId = link;
-      }
+    try {
+      const u = new URL(link);
+      openId = u.searchParams.get("openId") || "";
+      employeeId = u.searchParams.get("employeeId") || "";
+      areaId = u.searchParams.get("areaid") || areaId;
+    } catch {
+      openId = link; // 容错：直接粘贴裸 openId
     }
-    if (!openId) return console.log("❌ 未解析到 openId，请粘贴充电页链接（…indexn.html?openId=…）。"), 1;
+    if (!openId) return console.log("未解析到 openId，请粘贴充电页链接（…indexn.html?openId=…）。"), 1;
 
     const user = (await post("getUserInfo", { openId, areaId })).obj;
     if (!user?.employeeid) return console.log("❌ openId 无效，请重新复制链接。"), 1;
     employeeId = employeeId || String(user.employeeid);
-    console.log(`✅ 账号有效：id=${employeeId}，余额 ${yuan(user.readyaccountmoney)}`);
+    console.log(`账号有效：id=${employeeId}，余额 ${yuan(user.readyaccountmoney)}`);
 
     const merged = { ...LOCAL, areaId, openId, employeeId };
     delete merged.devaddress;
     delete merged.port;
     writeFileSync(join(DIR, "neptune.config.local.json"), JSON.stringify(merged, null, 2) + "\n");
-    console.log(`\n✅ 配置已写入（该文件不入库）。预约开电：chargeon <设备号> <插座号>`);
+    console.log(`\n配置已写入。预约开电：node neptune.mjs chargeon <设备号> <插座号>`);
     return 0;
   } finally {
     rl?.close();
@@ -247,7 +233,7 @@ async function cmdChargeOn(...args) {
   const [a, b] = args;
   if (a === "cancel") {
     saveAppointments([]);
-    console.log("✅ 已取消预约。");
+    console.log("已取消预约。");
     return 0;
   }
 
@@ -261,10 +247,10 @@ async function cmdChargeOn(...args) {
   const timeLocal = bjFormat(t);
   saveAppointments([{ time: t.toISOString(), timeLocal, devaddress, port, bookedAt: new Date().toISOString() }]);
   ensureServeRunning();
-  console.log(`✅ 已预约 ${timeLocal} 自动开电：设备 ${devaddress} 插座 ${port}\n取消：node neptune.mjs chargeon cancel`);
+  console.log(`已预约 ${timeLocal} 自动开电：设备 ${devaddress} 插座 ${port}\n取消：node neptune.mjs chargeon cancel`);
   return 0;
 }
-// ---- serve：极简预约服务器（POST /at 预约，到点自动开电）----
+// ---- serve：预约执行器（轮询队列文件，到点开电，队列空自动退出）----
 const APPT_FILE = join(DIR, "neptune.serve.json");
 const PID_FILE = join(DIR, "neptune.serve.pid");
 /** 确保执行器（serve）在后台运行：不在则自动拉起，等价于 nohup ... & */
@@ -292,79 +278,11 @@ function loadAppointments() {
 function saveAppointments(list) {
   writeFileSync(APPT_FILE, JSON.stringify(list, null, 2) + "\n");
 }
-function parseAtTime(str) {
-  const now = new Date();
-  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})$/);
-  let t;
-  if (m) t = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
-  else if ((m = str.match(/^(\d{1,2})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})$/))) {
-    t = new Date(now.getFullYear(), +m[1] - 1, +m[2], +m[3], +m[4]);
-    if (t <= now) t.setFullYear(t.getFullYear() + 1);
-  } else if ((m = str.match(/^(\d{1,2}):(\d{2})$/))) {
-    t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), +m[1], +m[2]);
-    if (t <= now) t.setDate(t.getDate() + 1);
-  } else return null;
-  return Number.isNaN(t.getTime()) || t <= now ? null : t;
-}
-async function cmdServe(portArg) {
+async function cmdServe() {
   requireOpenId();
-  const port = Number(portArg) || 7755;
   writeFileSync(PID_FILE, String(process.pid));
   let appointments = loadAppointments();
   let firing = false;
-
-  const server = http.createServer(async (req, res) => {
-    const send = (code, obj) => {
-      res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(obj, null, 2));
-    };
-    if (CONFIG.serveToken && req.headers["x-token"] !== CONFIG.serveToken) return send(401, { ok: false, error: "令牌不对" });
-    const url = new URL(req.url, "http://localhost");
-    try {
-      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/status")) {
-        let charging = null;
-        try {
-          charging = await isCharging();
-        } catch {}
-        return send(200, {
-          ok: true,
-          appointments,
-          charging: charging ? `插座 ${charging.devport}，${charging.begindt} 起` : null,
-        });
-      }
-      if (req.method === "POST" && url.pathname === "/at") {
-        let body = "";
-        for await (const c of req) body += c;
-        const j = JSON.parse(body || "{}");
-        const t = parseAtTime(String(j.time || "").trim());
-        if (!t) return send(400, { ok: false, error: 'time 支持 "HH:MM" / "MM-DD HH:MM" / "YYYY-MM-DD HH:MM"' });
-        const devaddress = String(j.devaddress || "");
-        const pilePort = String(j.port || "");
-        if (!/^\d{6,}$/.test(devaddress) || !/^\d{2}$/.test(pilePort)) {
-          return send(400, { ok: false, error: "需要 devaddress（≥6位数字）与 port（两位数字）" });
-        }
-        appointments = [
-          {
-            time: t.toISOString(),
-            timeLocal: `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`,
-            devaddress,
-            port: pilePort,
-            bookedAt: new Date().toISOString(),
-          },
-        ];
-        saveAppointments(appointments);
-        return send(200, { ok: true, booked: appointments });
-      }
-      if (req.method === "POST" && url.pathname === "/cancel") {
-        appointments = [];
-        saveAppointments(appointments);
-        return send(200, { ok: true, appointments });
-      }
-      send(404, { ok: false, error: "POST /at {time,devaddress?,port?} | POST /cancel | GET /status" });
-    } catch (err) {
-      send(500, { ok: false, error: String(err.message || err) });
-    }
-  });
 
   // 每 20 秒重读预约队列（chargeon 外部写入也能捡到），到点执行；过期超 1 小时丢弃
   setInterval(async () => {
@@ -391,23 +309,8 @@ async function cmdServe(portArg) {
     firing = false;
   }, 20_000);
 
-  server.listen(port, () => {
-    console.log(
-      [
-        "",
-        `预约服务器已启动：http://0.0.0.0:${port}`,
-        `  快捷  node neptune.mjs chargeon <设备号> <插座号>   # 预约下一个 6:30`,
-        `  预约  curl -X POST http://127.0.0.1:${port}/at -H 'Content-Type: application/json' -d '{"time":"11-08 06:35"}'`,
-        `  查看  curl http://127.0.0.1:${port}/status`,
-        `  取消  node neptune.mjs chargeon cancel`,
-        CONFIG.serveToken ? "" : "  ⚠️ 公网部署建议配置 serveToken（请求头 X-Token），否则谁都能消耗你的余额",
-        "",
-      ]
-        .filter(Boolean)
-        .join("\n")
-    );
-  });
-  await new Promise(() => {}); // 常驻，Ctrl+C 退出
+  console.log(`[serve] 执行器已启动（pid ${process.pid}），轮询预约队列中…`);
+  await new Promise(() => {}); // 常驻，队列空自动退出
 }
 
 // ---- status / stop ----
@@ -415,7 +318,7 @@ async function cmdStatus() {
   requireOpenId();
   const [user, ch] = await Promise.all([getUserInfo(), isCharging()]);
   console.log(`余额：${yuan(user.readyaccountmoney)}`);
-  console.log(ch ? `⚠️ 充电中：插座 ${ch.devport}，${ch.begindt} 起，预扣 ${yuan(ch.yfMoney)}` : "当前没有充电订单。");
+  console.log(ch ? `充电中：插座 ${ch.devport}，${ch.begindt} 起，预扣 ${yuan(ch.yfMoney)}` : "当前没有充电订单。");
   return 0;
 }
 async function cmdStop() {
@@ -436,7 +339,7 @@ async function cmdStop() {
   if (!r1.success) return console.log(`结束充电失败：${r1.msg}`), 1;
   const r2 = await post("offCharge", { ...base, count: 2, msgflag: r1.obj });
   if (r2.success) {
-    console.log(`✅ 已断电（插座 ${ch.devport}），退款约 30 秒到账。`);
+    console.log(`已断电（插座 ${ch.devport}），退款约 30 秒到账。`);
     return 0;
   }
   console.log(`断电确认失败：${r2.msg}，请到微信里手动结束。`);
@@ -459,7 +362,7 @@ if (!actions[cmd]) {
       "  login     配置向导（一次即可）\n" +
       "  chargeon  预约下一个 6:30 自动开电：chargeon <设备号> <插座号>；chargeon cancel = 取消预约\n" +
       "  stop      结束充电\n" +
-      "  status    余额 / 订单 / 端口状态\n" +
+      "  status    余额 / 充电订单\n" +
       "  serve     预约执行器（通常无需手动运行：chargeon 会自动拉起，队列空自动退出）"
   );
   process.exit(2);
