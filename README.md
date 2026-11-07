@@ -1,8 +1,8 @@
-# 浙江大学尼普顿定时开电
+# ZJU-ontime-charge
 
-单文件工具，让浙大「尼普顿 / 新能充电」（szlzxn.cn）充电桩在指定时间自动开电。零依赖，Node 18+。
+浙江大学尼普顿充电桩在指定时间自动开电。
 
-协议由作者对本人账号抓包独立还原，代码原创（灵感来自 [ZJU-Charger](https://github.com/ZJU-Charger/ZJU-Charger) 项目）。
+灵感来自 [ZJU-Charger](https://github.com/ZJU-Charger/ZJU-Charger) 
 
 ## 快速上手
 
@@ -10,10 +10,10 @@
 node neptune.mjs login    # ① 配置向导，一次即可
 ```
 
-按提示把**充电页链接**粘贴进去（新版微信没有「复制链接」，实测最稳的路径是走电脑微信）：
+按提示在电脑微信上获得**充电页链接**，之后粘贴进去：
 
 1. 手机把充电页转发给「文件传输助手」
-2. 电脑微信点开 → 打开 H5 窗口的 **History** 面板 → 右键「充电服务平台」条目 → **Send to Chat** → 发回文件传输助手
+2. 电脑微信点开 → 打开 H5 窗口的 **History** 面板 → 右键随便一个相关条目 → **Send to Chat** → 发回文件传输助手
 3. 聊天里**右键这条消息 → Open with Default Browser** → 复制浏览器地址栏
 
 <p align="center">
@@ -21,17 +21,15 @@ node neptune.mjs login    # ① 配置向导，一次即可
   <img src="docs/pc-wechat-open-in-browser.png" width="230" alt="右键消息卡片：Open with Default Browser">
 </p>
 
-目标链接形如（`openId` 在 `#` 之前，等同支付钥匙，勿外传）：
+目标链接形如：
 
 ```
 https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accountmoney=…#/
 ```
 
-向导会校验账号、从你的充电记录里选出常用桩和插座、写入本地配置（已被 `.gitignore` 排除）。
+请注意千万不要泄漏相关参数，不然会导致无故扣钱。而后把 .example给去除拼成`neptune.config.local.json`。
 
 ## 日常开电：chargeon
-
-换了个桩或插座？`chargeon` 一问一答直接开（扣已配置账号的预存款）：
 
 ```console
 $ node neptune.mjs chargeon
@@ -43,15 +41,15 @@ $ node neptune.mjs chargeon
 
 也可一行带参：`node neptune.mjs chargeon 50359162 04`。
 
-## 服务器预约开电（SSH 三步 + 每天一条命令）
+## 服务器预约开电
 
-**一次性部署**（SSH 到服务器）：
+**一次性部署**（SSH 到服务器，直接 clone 仓库）：
 
 ```bash
-scp -r ~/neptune-charge server:~/      # 仓库连本地配置一起带过去（自己的服务器，没问题）
 ssh server
-cd ~/neptune-charge && node neptune.mjs login     # 若配置没带过去，交互配置一次
-nohup node neptune.mjs serve > neptune.log 2>&1 & # 常驻预约服务（服务器需有 Node 18+）
+git clone https://github.com/symudie/ZJU-ontime-charge.git
+cd ZJU-ontime-charge && node neptune.mjs login     # clone 不含本地配置，需交互配置一次
+nohup node neptune.mjs serve > neptune.log 2>&1 &  # 常驻预约服务（服务器需有 Node 18+）
 ```
 
 **之后每次睡前，SSH 上去一条命令**（时间不用写，自动取下一个 6:30）：
