@@ -26,7 +26,6 @@ const CONFIG = {
   devaddress: LOCAL.devaddress || "",
   port: LOCAL.port || "",
   money: LOCAL.money || "7", // 页面开电时的金额选项（对应预扣 ¥2）
-  serverChanKey: LOCAL.serverChanKey || "", // Server酱 SendKey（可选，结果推微信）
   retryMinutes: Number(LOCAL.retryMinutes ?? 15), // 桩 6:35 才上线的重试窗口
   serveToken: LOCAL.serveToken || "", // 公网部署的访问令牌（可选）
 };
@@ -50,18 +49,6 @@ async function post(path, data) {
       await sleep(2000);
     }
   }
-}
-
-/** Server酱推送（未配置 key 时为空操作） */
-async function push(title, desp) {
-  if (!CONFIG.serverChanKey) return;
-  try {
-    await fetch(`https://sctapi.ftqq.com/${CONFIG.serverChanKey}.send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ title, desp }).toString(),
-    });
-  } catch {}
 }
 
 const getUserInfo = async () =>
@@ -119,7 +106,6 @@ async function startCharging(devaddress, port, retryMinutes = 0) {
     }
     if (balance < 200) {
       console.log(`余额不足（${yuan(balance)}），中止。`);
-      await push("尼普顿开电中止", `余额不足（${yuan(balance)}），请充值`);
       return 1;
     }
     if (dev.isWorkTime === 0) console.log(`设备未在营业时间（${dev.workTime ?? "?"}），仍尝试提交…`);
@@ -146,7 +132,6 @@ async function startCharging(devaddress, port, retryMinutes = 0) {
     let r = await post("beginCharge", base);
     if (!r.success && Date.now() >= deadline) {
       console.log(`开电失败：${r.msg}`);
-      await push("尼普顿开电失败", r.msg ?? "未知错误");
       return 1;
     }
     if (!r.success) {
@@ -167,11 +152,7 @@ async function startCharging(devaddress, port, retryMinutes = 0) {
     if (result?.success) {
       const obj = result.obj ?? {};
       console.log(
-        `✅ 开电成功：设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟`
-      );
-      await push(
-        "尼普顿开电成功",
-        `设备 ${devaddress} 插座 ${port}，预扣 ${yuan(obj.yfMoney)}，余额 ${yuan(user.readyaccountmoney)}` +
+        `✅ 开电成功：设备 ${devaddress} 插座 ${port}，${obj.begindt ?? ""} 起，预扣 ${yuan(obj.yfMoney)}，最长 ${obj.ycTime ?? 0} 分钟` +
           (attempt > 1 ? `（重试 ${attempt - 1} 次后成功）` : "")
       );
       return 0;
@@ -188,7 +169,6 @@ async function startCharging(devaddress, port, retryMinutes = 0) {
     }
     if (Date.now() >= deadline) {
       console.log("设备持续无响应，开电失败。请检查充电器是否插好。");
-      await push("尼普顿开电失败", "设备持续无响应，请检查充电器是否插好");
       return 1;
     }
     console.log(`设备持续无响应，30 秒后重试（窗口剩余 ${Math.max(1, Math.ceil((deadline - Date.now()) / 60000))} 分钟）…`);
@@ -319,7 +299,6 @@ async function cmdChargeOn(...args) {
   const timeLocal = `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
   saveAppointments([{ time: t.toISOString(), timeLocal, devaddress, port, bookedAt: new Date().toISOString() }]);
   console.log(`✅ 已预约 ${timeLocal} 自动开电：设备 ${devaddress} 插座 ${port}\n取消：node neptune.mjs chargeon cancel`);
-  await push("尼普顿预约成功", `${timeLocal} 开电（设备 ${devaddress} 插座 ${port}）`);
   return 0;
 }
 async function chargeInteractive(devArg, portArg) {
@@ -436,7 +415,6 @@ async function cmdServe(portArg) {
       console.log(`[serve] 开电流程结束，exit=${code}`);
     } catch (err) {
       console.log(`[serve] 开电异常：${err.message}`);
-      await push("尼普顿预约开电异常", String(err.message || err));
     }
     firing = false;
   }, 20_000);
@@ -487,7 +465,6 @@ async function cmdStop() {
   const r2 = await post("offCharge", { ...base, count: 2, msgflag: r1.obj });
   if (r2.success) {
     console.log(`✅ 已断电（插座 ${ch.devport}），退款约 30 秒到账。`);
-    await push("尼普顿已断电", `插座 ${ch.devport}，退款稍后到账`);
     return 0;
   }
   console.log(`断电确认失败：${r2.msg}，请到微信里手动结束。`);

@@ -4,6 +4,5 @@
   "employeeId": "你的用户数字id（抓包获取，仅断电时用到）",
   "devaddress": "你的桩设备号（如 50359162）",
   "port": "你插充电器的插座号（两位，如 04）",
-  "money": "7",
-  "serverChanKey": "Server酱SendKey（可选，开电结果推送到微信，sct.ftqq.com 免费申请）"
+  "money": "7"
 }

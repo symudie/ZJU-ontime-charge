@@ -64,7 +64,7 @@ node neptune.mjs status                    # 看余额 / 在充状态
 ```
 
 - `chargeon` 在早上 10 点前运行都算"今天早上这轮"，其余时间算明天
-- serve 到点自动执行：幂等 + 15 分钟重试窗口（桩 6:35 才上线也不怕），结果经 Server酱推微信（配置 `serverChanKey`）
+- serve 到点自动执行：幂等 + 15 分钟重试窗口（桩 6:35 才上线也不怕）
 - curl 接口同样可用：`POST /at {time,devaddress,port}`、`GET /status`、`POST /cancel`（方便接 bot / 手机快捷指令）
 - ⚠️ 公网部署设 `"serveToken"`（请求带 `X-Token` 头）或防火墙限端口 —— 预约消耗你的余额
 
