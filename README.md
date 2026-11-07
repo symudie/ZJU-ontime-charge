@@ -27,7 +27,7 @@ node neptune.mjs login    # ① 配置向导，一次即可
 https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accountmoney=…#/
 ```
 
-请注意千万不要泄漏相关参数，不然会导致无故扣钱。而后把 .example给去除拼成`neptune.config.local.json`。
+请注意千万不要泄漏相关参数（尤其 openId），不然会导致无故扣钱。`login` 会把这些参数自动写进配置文件 `neptune.config.local.json`（已被 .gitignore 排除，不会上传 GitHub），无需手动创建。
 
 ## 日常开电：chargeon
 
@@ -43,15 +43,14 @@ $ node neptune.mjs chargeon
 
 ## 服务器预约开电
 
-**一次性部署**（SSH 到服务器，直接 clone 仓库）：
+**一次性部署**：
 
 ```bash
-ssh server
 git clone https://github.com/symudie/ZJU-ontime-charge.git
 cd ZJU-ontime-charge && node neptune.mjs login     # clone 不含本地配置，需交互配置一次（之后无需常驻进程，chargeon 自动管理执行器）
 ```
 
-**之后每次睡前，SSH 上去一条命令**（时间不用写，自动取下一个 6:30）：
+之后在你想要预约的前一天晚上，执行：
 
 ```bash
 node neptune.mjs chargeon 50359162 04      # 预约下一个 6:30 自动开电
