@@ -405,12 +405,15 @@ async function cmdLogin() {
         "",
         "配置向导（约 30 秒，全程无需抓包）：",
         "  第 1 步：微信里打开你的充电页（平时扫码充电的那个页面）",
-        "  第 2 步：点右上角 ⋯ → 「复制链接」",
+        "  第 2 步：拿到页面链接（新版微信可能没有「复制链接」，任选其一）：",
+        "    a) 右上角 ⋯ → 「在浏览器打开」→ 在浏览器地址栏复制完整网址",
+        "    b) ⋯ → 转发给「文件传输助手」→ 在电脑微信点开 → 窗口右上角「在浏览器打开」→ 复制网址",
+        "    c) 老版本微信：⋯ → 「复制链接」直接用",
         "  第 3 步：把链接粘贴到下面（链接里有你的专属 openId，等同账号钥匙，仅存本机、勿外传）",
         "",
       ].join("\n")
     );
-    const link = await ask(rl, "粘贴链接: ");
+    const link = (await ask(rl, "粘贴链接: ")).replace(/&amp;/g, "&");
 
     let openId = "";
     let employeeId = "";
@@ -425,7 +428,11 @@ async function cmdLogin() {
       openId = link;
     }
     if (!openId) {
-      console.log("❌ 未能从输入中解析 openId，请确认复制的是充电页链接。");
+      console.log(
+        "❌ 未能从输入中解析 openId。\n" +
+          "请确认复制的是「充电页」本身的网址（形如 szlzxn.cn/wx/indexn.html?openId=…），\n" +
+          "而不是微信 OAuth 跳转中间页（open.weixin.qq.com 开头的没有 openId，需等跳转完成后再复制）。"
+      );
       return 1;
     }
 
