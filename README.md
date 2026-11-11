@@ -8,6 +8,8 @@
 
 首先克隆本仓库。
 
+需要 Node.js 18 或更新版本，无需安装 npm 依赖。
+
 ```bash
 git clone https://github.com/symudie/ZJU-ontime-charge.git
 cd ZJU-ontime-charge 
@@ -42,7 +44,7 @@ https://www.szlzxn.cn/wx/indexn.html?openId=****&areaid=6&employeeId=****&accoun
 
 ## 日常开电：chargeon
 
-在想要预约的前一天晚上执行：
+晚上插好充电器后执行（设备号和两位插座号按实际填写）：
 
 ```bash
 node neptune.mjs chargeon 50359162 04    # 预约下一个 6:30 自动开电
@@ -50,20 +52,28 @@ node neptune.mjs chargeon cancel           # 取消预约
 node neptune.mjs status                    # 看余额 / 在充状态
 ```
 
-- 我们提供了一个15分钟的轮询窗口，充电桩在6.45之前上线都可以正常充上电。
+- `chargeon` 只保存预约，不会立即开电；新预约会替换尚未执行的旧预约。
+- 时间固定为北京时间的**下一个 6:30**，与电脑或服务器的时区无关。当天 6:30 已过，就预约第二天，不再生成已经过期的任务。
+- 执行器会自动在后台启动，每 20 秒检查一次预约；开电时提供 15 分钟重试窗口，覆盖充电桩稍晚上线的情况。执行完毕或预约被取消后会自动退出。
+- `chargeon cancel` 取消尚未执行的预约，不会中止已经开始的开电流程；已有充电订单可用 `stop` 或微信结束。
+- 运行脚本的电脑或服务器需保持开机、唤醒、联网；关机或休眠期间无法保证定时执行。迟到超过 1 小时的任务会被丢弃，不自动补开电。
+- 后台结果查看 `neptune.log`；`status` 查询余额和充电订单，不显示预约队列。实际是否通电仍以设备或微信页面确认为准。
 
 ## 其他命令
 
 ```bash
-node neptune.mjs status   # 余额 / 充电订单 / 端口状态
+node neptune.mjs status   # 余额 / 充电订单
 node neptune.mjs stop     # 结束充电（退款约 30 秒到账）
+node neptune.mjs --help   # 查看用法
 ```
 
 ## 说明
 
 - 扣费为账户预存款。
 - 仅供学习交流与**本人账号**自用自动化；勿操作他人设备、勿高频请求；接口为非官方逆向，随时可能变更。
-- 也可手动配置：创建 `neptune.config.local.json`，字段：`openId` / `employeeId`（可选：`areaId`、`money`、`retryMinutes`）。桩位在每次 `chargeon` 时给出。
+- 也可复制 `neptune.config.local.example.json` 为 `neptune.config.local.json` 后填写 `openId`。可选字段：`areaId`（默认 `"6"`）、`money`（默认 `"7"`）、`retryMinutes`（默认 `15`，非负有限数字，`0` 表示不进行外层重试）。桩位在每次 `chargeon` 时给出；用户编号会在需要时查询，不用保存到配置。
+- 查询请求可自动重试一次；开电、停电请求遇到网络异常时不自动重发，避免结果未确认时重复提交。此时请先用 `status` 或微信确认，再决定下一步。例外：DNS 失败、连接被拒等请求确定未发出的错误，以及查询失败，会在定时开电的重试窗口内自动重试（覆盖刚唤醒时网络未就绪的情况）。
+- `neptune.config.local.json`、`neptune.serve.json`、`neptune.serve.pid` 和 `neptune.log` 都是本地运行数据，不应提交到仓库。
 
 ## License
 
